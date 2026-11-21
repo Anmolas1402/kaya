@@ -11,6 +11,7 @@ const schema = z.object({
     z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
   ),
   DATA_DIR: z.preprocess(optional, z.string().default("./data")),
+  LISTEN_HOST: z.preprocess(optional, z.string().default("127.0.0.1")),
   CORE_PORT: z.preprocess(
     optional,
     z.coerce
@@ -36,6 +37,7 @@ const schema = z.object({
 export type Config = Readonly<{
   logLevel: z.infer<typeof schema>["LOG_LEVEL"];
   dataDir: string;
+  listenHost: string;
   port: number;
   databaseUrl: string;
   llm: Readonly<{
@@ -67,6 +69,7 @@ export function loadConfig(
   return Object.freeze({
     logLevel: e.LOG_LEVEL,
     dataDir: resolve(baseDir, e.DATA_DIR),
+    listenHost: e.LISTEN_HOST,
     port: e.CORE_PORT,
     databaseUrl: e.DATABASE_URL,
     llm: Object.freeze({
