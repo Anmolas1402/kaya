@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import { type Config, ConfigError, loadConfig, loadEnvFile } from "./config/index.js";
+import { createContracts } from "./contracts/index.js";
 import { createDb } from "./lib/db.js";
 import { startHttpServer } from "./lib/http-server.js";
 import { createLogger, type Logger } from "./lib/logger.js";
@@ -26,6 +27,7 @@ function exitOnCrash(logger: Logger): void {
 
 async function run(config: Config, logger: Logger): Promise<void> {
   const stopping = stopSignal();
+  createContracts();
   const db = createDb(config.databaseUrl, logger);
   const providers = createProviders(config);
   try {
