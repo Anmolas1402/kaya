@@ -15,6 +15,7 @@ var logLevels = []string{"trace", "debug", "info", "warn", "error", "fatal"}
 type Config struct {
 	LogLevel    string
 	DataDir     string
+	ListenHost  string
 	Port        int
 	DatabaseURL string
 }
@@ -40,9 +41,10 @@ func Load(getenv func(string) string, baseDir string) (Config, error) {
 	fail := func(key, reason string) { problems = append(problems, key+": "+reason) }
 
 	cfg := Config{
-		LogLevel: orDefault(getenv("LOG_LEVEL"), "info"),
-		DataDir:  orDefault(getenv("DATA_DIR"), "./data"),
-		Port:     3001,
+		LogLevel:   orDefault(getenv("LOG_LEVEL"), "info"),
+		DataDir:    orDefault(getenv("DATA_DIR"), "./data"),
+		ListenHost: orDefault(getenv("LISTEN_HOST"), "127.0.0.1"),
+		Port:       3001,
 	}
 
 	if !slices.Contains(logLevels, cfg.LogLevel) {
