@@ -27,3 +27,18 @@ updates:
     groups:
       go-modules:
         patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /core
+      - /gateway
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
