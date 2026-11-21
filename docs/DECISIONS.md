@@ -40,6 +40,15 @@ Newest at the bottom. When a decision changes, mark the old one superseded inste
 | 26 | WhatsApp session stored in Postgres through whatsmeow's session store, not in a `whatsapp-auth` folder | One thing to back up and to move to the Victus |
 | 27 | Every message between services has a JSON Schema in `contracts/`, validated on both sides | Two languages can't share types directly; the schema is the single source |
 
+## Settled (2026-11-22)
+
+| # | Decision | Why |
+|---|---|---|
+| 28 | Containers: core on `distroless/nodejs24`, gateway on `distroless/static`, both as the non-root user with a read-only root filesystem and no capabilities. Postgres is `pgvector/pgvector` on Postgres 18. Every base image is pinned by version and digest, and Dependabot updates them. | Small images with no shell or package manager to exploit; digests make builds repeatable |
+| 29 | Each service has a minimal `/health` from phase 0.5 so Compose health checks work; phase 0.7 adds db status. A `healthcheck` command inside each image calls it, since distroless images have no curl. | `docker compose up` can only report healthy if the services run and answer |
+| 30 | Services bind to `127.0.0.1` by default (`LISTEN_HOST`); Compose binds `0.0.0.0` inside containers and publishes ports on `127.0.0.1` only | Nothing is reachable from the network unless Tailscale or the tunnel is set up for it |
+| 31 | The gateway container gets only the settings it uses, not the whole `.env` | The service holding the WhatsApp session never sees API keys |
+
 ## Open questions
 
 - **Gateway → core transport (phase 1.0):** HTTP webhooks, Postgres LISTEN/NOTIFY, or a small queue
