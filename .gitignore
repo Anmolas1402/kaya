@@ -1,0 +1,6 @@
+CLAUDE.md
+node_modules/
+.env
+*.env
+whatsapp-auth/
+browser-profile/
