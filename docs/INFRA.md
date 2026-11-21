@@ -123,6 +123,13 @@ set a proper device name, back off slowly on reconnects.
 - **Public entry:** the Cloudflare Tunnel exposes only the voice service's webhook and audio routes,
   and every request is checked against the provider's signature.
 - **Containers:** talk over a private Docker network. Only cloudflared faces the internet.
+- **Images:** multi-stage builds; core and gateway run on distroless images as the non-root user
+  (uid 65532) with a read-only root filesystem, no capabilities and `no-new-privileges`. Base images
+  are pinned by version and digest and updated through Dependabot.
+- **Ports:** services bind to `127.0.0.1` when run from source (`LISTEN_HOST`). Compose binds them to
+  `0.0.0.0` inside the containers and publishes them on `127.0.0.1` only.
+- **Env per service:** core gets `.env`; the gateway gets only the settings it uses, so it never sees
+  API keys.
 - **Secrets:** `.env` with `chmod 600` (or Docker secrets), never in git.
 - **Disk:** full-disk encryption (LUKS), chosen in the Mint installer.
 - **Updates:** `unattended-upgrades` for OS patches. Container images updated by hand monthly.
