@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dhananjay6561/kaya/gateway/internal/config"
+	"github.com/dhananjay6561/kaya/gateway/internal/contracts"
 	"github.com/dhananjay6561/kaya/gateway/internal/httpapi"
 	"github.com/dhananjay6561/kaya/gateway/internal/logging"
 	"github.com/dhananjay6561/kaya/gateway/internal/store"
@@ -64,6 +65,10 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	context.AfterFunc(ctx, stop)
+
+	if _, err := contracts.NewValidator(); err != nil {
+		return err
+	}
 
 	db, err := store.Open(cfg.DatabaseURL)
 	if err != nil {
