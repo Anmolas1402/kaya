@@ -18,7 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Config{LogLevel: "info", DataDir: "/base/data", Port: 3001, DatabaseURL: validURL}
+	want := Config{LogLevel: "info", DataDir: "/base/data", ListenHost: "127.0.0.1", Port: 3001, DatabaseURL: validURL}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
 	}
@@ -30,11 +30,15 @@ func TestLoadAllValues(t *testing.T) {
 		"LOG_LEVEL":    "debug",
 		"DATA_DIR":     "/srv/kaya",
 		"GATEWAY_PORT": "9000",
+		"LISTEN_HOST":  "0.0.0.0",
 	}), "/base")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Config{LogLevel: "debug", DataDir: "/srv/kaya", Port: 9000, DatabaseURL: "postgresql://db:5432/kaya"}
+	want := Config{
+		LogLevel: "debug", DataDir: "/srv/kaya", ListenHost: "0.0.0.0", Port: 9000,
+		DatabaseURL: "postgresql://db:5432/kaya",
+	}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
 	}
