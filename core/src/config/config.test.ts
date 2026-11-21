@@ -22,6 +22,7 @@ describe("loadConfig", () => {
     const config = loadConfig(valid, "/base");
     assert.equal(config.logLevel, "info");
     assert.equal(config.port, 3000);
+    assert.equal(config.listenHost, "127.0.0.1");
     assert.equal(config.dataDir, "/base/data");
     assert.equal(config.llm.provider, "groq");
     assert.equal(config.llm.groq.heavyModel, "openai/gpt-oss-120b");
@@ -34,6 +35,7 @@ describe("loadConfig", () => {
         ...valid,
         LOG_LEVEL: "debug",
         CORE_PORT: "8080",
+        LISTEN_HOST: "0.0.0.0",
         DATA_DIR: "/srv/kaya",
         GROQ_MODEL_HEAVY: "heavy",
         GROQ_MODEL_ROUTINE: "routine",
@@ -42,6 +44,7 @@ describe("loadConfig", () => {
     );
     assert.equal(config.logLevel, "debug");
     assert.equal(config.port, 8080);
+    assert.equal(config.listenHost, "0.0.0.0");
     assert.equal(config.dataDir, "/srv/kaya");
     assert.equal(config.llm.groq.heavyModel, "heavy");
     assert.equal(config.llm.groq.routineModel, "routine");
