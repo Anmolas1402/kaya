@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/*.test.ts
+**/*.env
+.env
+.git
+data
+gateway
+docs
