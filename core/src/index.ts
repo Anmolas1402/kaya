@@ -1,16 +1,30 @@
 import { dirname } from "node:path";
 import { ConfigError, loadConfig, loadEnvFile } from "./config/index.js";
+import { startHealthServer } from "./modules/health/index.js";
 
 const version = process.env.npm_package_version ?? "dev";
 
-try {
+function stopSignal(): Promise<NodeJS.Signals> {
+  return new Promise((resolve) => {
+    for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, resolve);
+  });
+}
+
+async function main(): Promise<void> {
   const envFile = loadEnvFile();
   const config = loadConfig(process.env, envFile ? dirname(envFile) : process.cwd());
+  const server = await startHealthServer(config.listenHost, config.port);
   console.log(
-    `kaya ${version} starting (llm: ${config.llm.provider}, data: ${config.dataDir}, port: ${config.port})`,
+    `kaya ${version} listening on ${config.listenHost}:${server.port} (llm: ${config.llm.provider}, data: ${config.dataDir})`,
   );
-} catch (error) {
-  if (!(error instanceof ConfigError)) throw error;
-  console.error(error.message);
-  process.exitCode = 1;
+
+  const signal = await stopSignal();
+  console.log(`kaya stopping (${signal})`);
+  await server.close();
+  console.log("kaya stopped");
 }
+
+main().catch((error: unknown) => {
+  console.error(error instanceof ConfigError ? error.message : error);
+  process.exitCode = 1;
+});
