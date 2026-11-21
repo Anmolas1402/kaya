@@ -44,6 +44,23 @@ jobs:
           working-directory: gateway
       - run: make test-gateway build-gateway
 
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: write a test .env
+        run: |
+          cp .env.example .env
+          sed -i 's/^COMPOSE_FILE=.*/COMPOSE_FILE=compose.yml/; s/^GROQ_API_KEY=.*/GROQ_API_KEY=ci-placeholder/' .env
+      - run: docker compose up --build --detach --wait --wait-timeout 180
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down --volumes
+
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
