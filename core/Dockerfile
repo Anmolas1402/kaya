@@ -17,7 +17,8 @@ RUN npm ci --omit=dev --ignore-scripts
 FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:6abfcb367ebc291572c774c1592a986be2ab26a2486f73093401327495a5962a
 RUN ["/nodejs/bin/node", "-e", "if (process.version !== 'v24.22.3') { console.error('runtime node ' + process.version + ' does not match the build stage v24.22.3'); process.exit(1) }"]
 WORKDIR /app
-ENV NODE_ENV=production
+ARG VERSION=dev
+ENV NODE_ENV=production KAYA_VERSION=${VERSION}
 COPY --from=deps /app/node_modules node_modules
 COPY --from=build /app/core/package.json core/
 COPY --from=build /app/core/dist core/dist
