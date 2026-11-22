@@ -51,6 +51,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	context.AfterFunc(ctx, stop)
 
 	addr := net.JoinHostPort(cfg.ListenHost, strconv.Itoa(cfg.Port))
 	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", addr)
