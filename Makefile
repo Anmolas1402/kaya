@@ -87,7 +87,9 @@ ps: ## show the status of every service
 migrate: ## apply pending migrations
 	$(COMPOSE) run --rm migrate
 
-rollback: ## roll back the latest migration
+rollback: ## roll back the latest migration on the live db (asks first)
+	@printf 'Roll back the latest migration on the live database? It can drop stored chats. [y/N] '; \
+		read answer; [ "$$answer" = y ] || { echo "not rolled back"; exit 1; }
 	$(COMPOSE) run --rm migrate --wait rollback
 
 migration: ## create an empty migration: make migration name=add_tasks
@@ -95,5 +97,17 @@ migration: ## create an empty migration: make migration name=add_tasks
 	@f=db/migrations/$$(date -u +%Y%m%d%H%M%S)_$(name).sql; \
 		printf -- '-- migrate:up\n\n-- migrate:down\n' > $$f && echo "created $$f"
 
-test-db: ## run the schema tests against the running db
-	$(COMPOSE) exec -T db sh -c 'psql -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < db/tests/schema.sql
+TEST_DB := kaya_schema_test
+PSQL := $(COMPOSE) exec -T db sh -c
+MIGRATE_TEST := $(COMPOSE) run --rm --no-deps migrate --env TEST_DATABASE_URL --wait
+
+test-db: ## on a throwaway db: migrate, rerun (must be a no-op), roll back, reapply, schema tests
+	@set -e; \
+	$(PSQL) 'dropdb --if-exists -U "$$POSTGRES_USER" $(TEST_DB) && createdb -U "$$POSTGRES_USER" $(TEST_DB)'; \
+	trap '$(PSQL) '"'"'dropdb --if-exists -U "$$POSTGRES_USER" $(TEST_DB)'"'"'' EXIT; \
+	$(MIGRATE_TEST) up; \
+	rerun=$$($(MIGRATE_TEST) up); \
+	if echo "$$rerun" | grep -q Applying; then echo "rerunning migrations applied something:"; echo "$$rerun"; exit 1; fi; \
+	$(MIGRATE_TEST) rollback; \
+	$(MIGRATE_TEST) up; \
+	$(PSQL) 'psql -q -U "$$POSTGRES_USER" -d $(TEST_DB)' < db/tests/schema.sql
