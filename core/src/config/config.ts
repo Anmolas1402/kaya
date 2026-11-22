@@ -5,6 +5,8 @@ const optional = (value: unknown) => (value === "" ? undefined : value);
 
 const portRange = { error: "must be between 1 and 65535" };
 
+const defaultLlmProvider = "groq";
+
 const schema = z.object({
   LOG_LEVEL: z.preprocess(
     optional,
@@ -28,7 +30,7 @@ const schema = z.object({
       error: (issue) => (issue.input === undefined ? "required" : "must be a postgres:// URL"),
     }),
   ),
-  LLM_PROVIDER: z.preprocess(optional, z.enum(["groq", "stub"]).default("groq")),
+  LLM_PROVIDER: z.preprocess(optional, z.enum(["groq", "stub"]).default(defaultLlmProvider)),
   GROQ_API_KEY: z.preprocess(optional, z.string().optional()),
   GROQ_MODEL_HEAVY: z.preprocess(optional, z.string().default("openai/gpt-oss-120b")),
   GROQ_MODEL_ROUTINE: z.preprocess(optional, z.string().default("openai/gpt-oss-20b")),
@@ -70,7 +72,7 @@ export function loadConfig(
   const problems = result.success
     ? []
     : result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
-  const llmProvider = optional(env.LLM_PROVIDER) ?? "groq";
+  const llmProvider = optional(env.LLM_PROVIDER) ?? defaultLlmProvider;
   if (llmProvider === "groq" && optional(env.GROQ_API_KEY) === undefined) {
     problems.push("GROQ_API_KEY: required");
   }
