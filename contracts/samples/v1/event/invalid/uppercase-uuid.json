@@ -1,0 +1,11 @@
+{
+  "id": "6F1C1D2A-3B4C-4D5E-8F60-718293A4B5C6",
+  "version": 1,
+  "occurred_at": "2026-11-22T09:30:00Z",
+  "type": "history.synced",
+  "data": {
+    "chats": 1,
+    "messages": 1,
+    "complete": true
+  }
+}

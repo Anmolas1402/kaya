@@ -9,13 +9,15 @@ schemas/v1/
 ├── defs.schema.json           shared pieces: uuid, timestamp, jid, message kind, error
 ├── event.schema.json          gateway → core
 └── send-request.schema.json   core → gateway
-samples/v1/<schema>/
-├── valid/                     must pass on every side, and round-trip through the Go types
-└── invalid/                   must fail on every side, each for one reason named in the file name
+samples/
+├── samples.go                 Go package embedding v1/; only tests import it
+└── v1/<schema>/
+    ├── valid/                 must pass on every side, and round-trip through the Go types
+    └── invalid/               must fail on every side, each for one reason named in the file name
 ```
 
-This folder is also a Go module (`contracts.go` embeds the schemas and samples) and an npm workspace
-package (`@kaya/contracts`), so both services load the same files.
+This folder is also a Go module (`contracts.go` embeds the schemas) and an npm workspace package
+(`@kaya/contracts`), so both services load the same files.
 
 ## Changing a contract
 

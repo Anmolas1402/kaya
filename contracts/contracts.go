@@ -1,4 +1,5 @@
-// Package contracts embeds the JSON Schemas and sample payloads shared by every Kaya service.
+// Package contracts embeds the JSON Schemas shared by every Kaya service. Sample payloads live in
+// the samples subpackage, which only tests import.
 package contracts
 
 import "embed"
@@ -7,8 +8,3 @@ import "embed"
 //
 //go:embed schemas
 var Schemas embed.FS
-
-// Samples holds samples/v1/<schema>/{valid,invalid}/*.json, which every side's tests check.
-//
-//go:embed samples
-var Samples embed.FS
