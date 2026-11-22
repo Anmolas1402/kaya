@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { connect } from "node:net";
 import { describe, it } from "node:test";
 import {
   type HttpServerOptions,
@@ -80,6 +81,36 @@ describe("startHttpServer", () => {
         assert.ok(lines.some((l) => l.msg === "request failed" && l.level === "error"));
       },
     );
+  });
+
+  it("answers 400 to request targets URL can't parse, and keeps serving", async () => {
+    await withServer({ "/ping": (_req, res) => sendJson(res, 200, {}) }, async (base) => {
+      const { port } = new URL(base);
+      for (const target of ["//", "///", "//["]) {
+        const reply = await new Promise<string>((resolve, reject) => {
+          const socket = connect(Number(port), "127.0.0.1", () => {
+            socket.end(`GET ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`);
+          });
+          let data = "";
+          socket.on("data", (chunk) => {
+            data += chunk;
+          });
+          socket.on("end", () => resolve(data));
+          socket.on("error", reject);
+        });
+        assert.match(reply, /^HTTP\/1\.1 400 /, target);
+      }
+      assert.equal((await fetch(`${base}/ping`)).status, 200);
+    });
+  });
+
+  it("logs health requests at debug, even when they fail", async () => {
+    await withServer({ "/health": (_req, res) => sendJson(res, 503, {}) }, async (base, lines) => {
+      await fetch(`${base}/health`);
+      const line = lines.find((l) => l.msg === "http request");
+      assert.equal(line?.level, "debug");
+      assert.equal(line?.status, 503);
+    });
   });
 
   it("stops answering after close", async () => {

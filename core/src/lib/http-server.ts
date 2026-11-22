@@ -43,29 +43,42 @@ function requestIdFrom(req: IncomingMessage): string {
 export async function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
   const { logger, routes } = options;
 
-  const server = createServer(async (req, res) => {
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const started = performance.now();
-    const requestId = requestIdFrom(req);
-    const log = logger.child({ request_id: requestId });
-    res.setHeader(requestIdHeader, requestId);
-    const path = new URL(req.url ?? "/", "http://localhost").pathname;
-
+    let log = logger;
+    let path = "(unparsed)";
     try {
-      const route = Object.hasOwn(routes, path) ? routes[path] : undefined;
-      if (route) await route(req, res, { logger: log, requestId });
-      else res.writeHead(404).end();
+      const requestId = requestIdFrom(req);
+      log = logger.child({ request_id: requestId });
+      res.setHeader(requestIdHeader, requestId);
+      const url = URL.parse(req.url ?? "/", "http://localhost");
+      if (!url) {
+        res.writeHead(400).end();
+      } else {
+        path = url.pathname;
+        const route = Object.hasOwn(routes, path) ? routes[path] : undefined;
+        if (route) await route(req, res, { logger: log, requestId });
+        else res.writeHead(404).end();
+      }
     } catch (err) {
       log.error({ err, path }, "request failed");
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
       else res.destroy();
+    } finally {
+      const status = res.statusCode;
+      const level = path === "/health" ? "debug" : status >= 500 ? "error" : "info";
+      log[level](
+        { method: req.method, path, status, duration_ms: Math.round(performance.now() - started) },
+        "http request",
+      );
     }
+  };
 
-    const status = res.statusCode;
-    const level = status >= 500 ? "error" : path === "/health" ? "debug" : "info";
-    log[level](
-      { method: req.method, path, status, duration_ms: Math.round(performance.now() - started) },
-      "http request",
-    );
+  const server = createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
+      logger.error({ err }, "request handler failed");
+      res.destroy();
+    });
   });
   server.headersTimeout = 5_000;
   server.requestTimeout = 10_000;
