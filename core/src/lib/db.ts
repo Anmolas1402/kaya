@@ -7,11 +7,15 @@ export type Db = Readonly<{
   close(): Promise<void>;
 }>;
 
-function aborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) reject(signal.reason);
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  ]);
 }
 
 export function createDb(url: string, logger: Logger): Db {
@@ -20,6 +24,7 @@ export function createDb(url: string, logger: Logger): Db {
     max: 10,
     idleTimeoutMillis: 5 * 60_000,
     connectionTimeoutMillis: 5_000,
+    keepAlive: true,
     application_name: "kaya-core",
   });
   pool.on("error", (err) => logger.error({ err }, "idle db connection failed"));
@@ -27,13 +32,38 @@ export function createDb(url: string, logger: Logger): Db {
   return Object.freeze({
     pool,
     async check(signal?: AbortSignal) {
-      const query = pool.query("SELECT 1");
-      if (!signal) {
-        await query;
-        return;
+      signal?.throwIfAborted();
+      const connecting = pool.connect();
+      let client: pg.PoolClient;
+      try {
+        client = await untilAborted(connecting, signal);
+      } catch (err) {
+        connecting.then(
+          (late) => late.release(true),
+          () => {},
+        );
+        throw err;
       }
-      query.catch(() => {});
-      await Promise.race([query, aborted(signal)]);
+
+      let released = false;
+      const release = (destroy: boolean) => {
+        if (released) return;
+        released = true;
+        client.release(destroy);
+      };
+      const onAbort = () => release(true);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const query = client.query("SELECT 1");
+        query.catch(() => {});
+        await untilAborted(query, signal);
+        release(false);
+      } catch (err) {
+        release(true);
+        throw err;
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+      }
     },
     close: () => pool.end(),
   });
