@@ -141,7 +141,17 @@ BEGIN
     first_value(id) OVER w AS survivor,
     count(*) OVER w AS copies
   FROM messages
-  WHERE sender_id IN (keep, gone) OR chat_id IN (keep_chat, gone_chat)
+  WHERE id IN (
+    SELECT m.id FROM messages m WHERE m.sender_id = gone OR m.chat_id = gone_chat
+    UNION ALL
+    SELECT k.id
+    FROM messages m
+    JOIN messages k
+      ON k.wa_id = m.wa_id
+     AND k.chat_id = CASE WHEN m.chat_id = gone_chat THEN keep_chat ELSE m.chat_id END
+     AND k.sender_id = CASE WHEN m.sender_id = gone THEN keep ELSE m.sender_id END
+    WHERE m.sender_id = gone OR m.chat_id = gone_chat
+  )
   WINDOW w AS (
     PARTITION BY
       CASE WHEN chat_id = gone_chat THEN keep_chat ELSE chat_id END,
