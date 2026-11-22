@@ -20,6 +20,7 @@ make db            # start only Postgres and apply migrations, for running servi
 make up            # build and run the whole stack in Docker, wait until healthy
 make down          # stop the stack (data stays in DATA_DIR)
 make migration name=add_tasks   # new empty migration in db/migrations
+make test-db       # migrations and schema tests on a throwaway database
 make check         # lint, typecheck, test and build everything (what CI runs)
 make help          # list every target
 ```
