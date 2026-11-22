@@ -2,7 +2,12 @@ import type { Config } from "../../config/index.js";
 import { createStubTelephony } from "./stub.js";
 import type { TelephonyProvider } from "./types.js";
 
-export { createStubTelephony, type StubTelephony } from "./stub.js";
+export {
+  createStubTelephony,
+  type StubCallOutcome,
+  type StubTelephony,
+  type StubTelephonyOptions,
+} from "./stub.js";
 export type * from "./types.js";
 
 export function createTelephony(config: Config["telephony"]): TelephonyProvider {
