@@ -2,31 +2,52 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kaya.invalid/contracts/v1/send-request.schema.json",
   "title": "SendRequest",
-  "description": "A message core asks the gateway to send. Core only creates one after DJ confirmed it (or for its own chat with DJ). The gateway sends each id at most once.",
+  "description": "A message core asks the gateway to send. The gateway checks the authorization before sending, never sends after expires_at (it reports send.result failed with code expired instead), sends each id at most once, and reports the outcome in a send.result event (see 'How services talk' in docs/ARCHITECTURE.md).",
   "type": "object",
   "properties": {
     "id": {
       "description": "Unique per request; the key for at-most-once sending",
       "$ref": "defs.schema.json#/$defs/uuid"
     },
-    "version": { "const": 1 },
-    "created_at": { "$ref": "defs.schema.json#/$defs/timestamp" },
-    "to": {
-      "description": "Chat to send to",
-      "$ref": "defs.schema.json#/$defs/jid"
+    "version": {
+      "const": 1
     },
-    "content": { "$ref": "#/$defs/textContent" },
-    "reply_to": { "$ref": "#/$defs/replyTo" }
+    "created_at": {
+      "$ref": "defs.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "defs.schema.json#/$defs/timestamp"
+    },
+    "to": {
+      "$ref": "defs.schema.json#/$defs/sendTarget"
+    },
+    "authorization": {
+      "$ref": "#/$defs/authorization"
+    },
+    "content": {
+      "$ref": "#/$defs/textContent"
+    },
+    "reply_to": {
+      "$ref": "#/$defs/replyTo"
+    }
   },
-  "required": ["id", "version", "created_at", "to", "content"],
+  "required": ["id", "version", "created_at", "expires_at", "to", "authorization", "content"],
   "additionalProperties": false,
   "$defs": {
     "textContent": {
       "title": "TextContent",
       "type": "object",
       "properties": {
-        "type": { "const": "text" },
-        "text": { "type": "string", "minLength": 1, "maxLength": 65536, "pattern": "\\S" }
+        "type": {
+          "const": "text"
+        },
+        "text": {
+          "description": "Must contain a character other than an ASCII space, tab or line break; core trims before building the request",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536,
+          "pattern": "[^ \\t\\r\\n]"
+        }
       },
       "required": ["type", "text"],
       "additionalProperties": false
@@ -36,11 +57,46 @@
       "description": "The message this one quotes",
       "type": "object",
       "properties": {
-        "wa_id": { "$ref": "defs.schema.json#/$defs/waId" },
-        "sender_jid": { "$ref": "defs.schema.json#/$defs/jid" }
+        "wa_id": {
+          "$ref": "defs.schema.json#/$defs/waId"
+        },
+        "sender_jid": {
+          "$ref": "defs.schema.json#/$defs/jid"
+        }
       },
       "required": ["wa_id", "sender_jid"],
       "additionalProperties": false
+    },
+    "authorization": {
+      "title": "Authorization",
+      "description": "Why this send is allowed. self_chat: Kaya replying in its own chat with DJ, only ever to DJ's own JID. confirmed: DJ said yes to pending action action_id, which must exist, be confirmed and target the same chat.",
+      "oneOf": [
+        {
+          "title": "SelfChatAuthorization",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "self_chat"
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "title": "ConfirmedAuthorization",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "confirmed"
+            },
+            "action_id": {
+              "$ref": "defs.schema.json#/$defs/uuid"
+            }
+          },
+          "required": ["kind", "action_id"],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }
