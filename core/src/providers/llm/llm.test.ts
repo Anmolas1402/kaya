@@ -17,6 +17,7 @@ describe("stub llm", () => {
     });
     assert.equal(result.text, "stub reply: what did Rahul say?");
     assert.equal(result.model, "stub-routine");
+    assert.equal(result.finishReason, "stop");
     assert.ok(result.usage.inputTokens > 0);
     assert.ok(result.usage.outputTokens > 0);
     assert.equal(llm.requests.length, 1);

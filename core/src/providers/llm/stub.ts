@@ -27,6 +27,7 @@ export function createStubLlm(options: StubLlmOptions = {}): StubLlm {
       return {
         text,
         model: `stub-${request.tier}`,
+        finishReason: "stop",
         usage: { inputTokens: input, outputTokens: roughTokens(text) },
       };
     },
