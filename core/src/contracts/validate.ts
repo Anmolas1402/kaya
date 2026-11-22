@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import formatsPlugin from "ajv-formats";
 import { loadSchemas, schemaBaseUrl } from "./schemas.js";
-import type { GatewayEvent, ReplyTo, SendRequest } from "./types.gen.js";
+import type { Authorization, GatewayEvent, ReplyTo, SendRequest } from "./types.gen.js";
 
 const addFormats = formatsPlugin as unknown as typeof formatsPlugin.default;
 
@@ -71,13 +71,29 @@ export function createContracts(): Contracts {
   });
 }
 
-export function newSendRequest(to: string, text: string, replyTo?: ReplyTo): SendRequest {
+export type NewSendRequestOptions = Readonly<{
+  replyTo?: ReplyTo;
+  ttlMs?: number;
+  now?: Date;
+}>;
+
+export const defaultSendTtlMs = 15 * 60_000;
+
+export function newSendRequest(
+  to: string,
+  text: string,
+  authorization: Authorization,
+  options: NewSendRequestOptions = {},
+): SendRequest {
+  const now = options.now ?? new Date();
   return {
     id: randomUUID(),
     version: 1,
-    created_at: new Date().toISOString(),
+    created_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + (options.ttlMs ?? defaultSendTtlMs)).toISOString(),
     to,
-    content: { type: "text", text },
-    ...(replyTo ? { reply_to: replyTo } : {}),
+    authorization,
+    content: { type: "text", text: text.trim() },
+    ...(options.replyTo ? { reply_to: options.replyTo } : {}),
   };
 }

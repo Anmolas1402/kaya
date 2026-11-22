@@ -11,13 +11,17 @@ export type GatewayEvent = {
   type: "connection.state" | "message.stored" | "history.synced" | "send.result";
 } & (ConnectionStateEvent | MessageStoredEvent | HistorySyncedEvent | SendResultEvent);
 /**
- * RFC 3339 time in UTC
+ * RFC 3339 time in UTC with an uppercase T and Z, e.g. 2026-11-22T09:30:00Z or 2026-11-22T09:30:00.123Z
  */
 export type Timestamp = string;
+/**
+ * Why this send is allowed. self_chat: Kaya replying in its own chat with DJ, only ever to DJ's own JID. confirmed: DJ said yes to pending action action_id, which must exist, be confirmed and target the same chat.
+ */
+export type Authorization = SelfChatAuthorization | ConfirmedAuthorization;
 
 export interface ConnectionStateEvent {
   /**
-   * Unique per event; the key for at-most-once handling
+   * Unique per emitted event. It deduplicates redelivery of the same outbox row only; see message.stored for how a repeated WhatsApp message is handled
    */
   id: string;
   version: 1;
@@ -38,7 +42,7 @@ export interface ConnectionState {
 }
 export interface MessageStoredEvent {
   /**
-   * Unique per event; the key for at-most-once handling
+   * Unique per emitted event. It deduplicates redelivery of the same outbox row only; see message.stored for how a repeated WhatsApp message is handled
    */
   id: string;
   version: 1;
@@ -47,21 +51,21 @@ export interface MessageStoredEvent {
   data: MessageStored;
 }
 /**
- * A message row was written. The body stays in the database; core reads it by message_id.
+ * A message row was inserted or changed. The gateway emits it only when the upsert actually inserted the row or changed it (a redelivered or overlapping copy emits nothing), and the body stays in the database; core reads it by message_id. Core keys command handling on (message_id, change), never on the event id.
  */
 export interface MessageStored {
   /**
-   * messages.id in the database
+   * messages.id
    */
   message_id: number;
   /**
-   * WhatsApp JID without a device part, e.g. 919812345678@s.whatsapp.net, 120363000000000000@g.us or 100000000000001@lid
+   * chats.id
    */
-  chat_jid: string;
+  chat_id: number;
   /**
-   * WhatsApp JID without a device part, e.g. 919812345678@s.whatsapp.net, 120363000000000000@g.us or 100000000000001@lid
+   * contacts.id of the sender
    */
-  sender_jid: string;
+  sender_id: number;
   /**
    * WhatsApp message id
    */
@@ -85,7 +89,7 @@ export interface MessageStored {
 }
 export interface HistorySyncedEvent {
   /**
-   * Unique per event; the key for at-most-once handling
+   * Unique per emitted event. It deduplicates redelivery of the same outbox row only; see message.stored for how a repeated WhatsApp message is handled
    */
   id: string;
   version: 1;
@@ -107,7 +111,7 @@ export interface HistorySynced {
 }
 export interface SendResultEvent {
   /**
-   * Unique per event; the key for at-most-once handling
+   * Unique per emitted event. It deduplicates redelivery of the same outbox row only; see message.stored for how a repeated WhatsApp message is handled
    */
   id: string;
   version: 1;
@@ -119,6 +123,9 @@ export interface SendResultEvent {
  * What happened to a send request
  */
 export interface SendResult {
+  /**
+   * Lowercase hyphenated UUID; the pattern pins the syntax so every validator agrees
+   */
   request_id: string;
   status: "sent" | "failed";
   /**
@@ -132,24 +139,39 @@ export interface ErrorDetail {
   message: string;
 }
 /**
- * A message core asks the gateway to send. Core only creates one after DJ confirmed it (or for its own chat with DJ). The gateway sends each id at most once.
+ * A message core asks the gateway to send. The gateway checks the authorization before sending, never sends after expires_at (it reports send.result failed with code expired instead), sends each id at most once, and reports the outcome in a send.result event (see 'How services talk' in docs/ARCHITECTURE.md).
  */
 export interface SendRequest {
   /**
-   * Unique per request; the key for at-most-once sending
+   * Lowercase hyphenated UUID; the pattern pins the syntax so every validator agrees
    */
   id: string;
   version: 1;
   created_at: Timestamp;
+  expires_at: Timestamp;
   /**
-   * WhatsApp JID without a device part, e.g. 919812345678@s.whatsapp.net, 120363000000000000@g.us or 100000000000001@lid
+   * A chat Kaya may send to: a person (phone-number or LID JID) or a group. Status, broadcast lists, channels and bots are not allowed.
    */
   to: string;
+  authorization: Authorization;
   content: TextContent;
   reply_to?: ReplyTo;
 }
+export interface SelfChatAuthorization {
+  kind: "self_chat";
+}
+export interface ConfirmedAuthorization {
+  kind: "confirmed";
+  /**
+   * Lowercase hyphenated UUID; the pattern pins the syntax so every validator agrees
+   */
+  action_id: string;
+}
 export interface TextContent {
   type: "text";
+  /**
+   * Must contain a character other than an ASCII space, tab or line break; core trims before building the request
+   */
   text: string;
 }
 /**
@@ -161,7 +183,7 @@ export interface ReplyTo {
    */
   wa_id: string;
   /**
-   * WhatsApp JID without a device part, e.g. 919812345678@s.whatsapp.net, 120363000000000000@g.us or 100000000000001@lid
+   * Any WhatsApp JID without a device part, as observed from whatsmeow: people (s.whatsapp.net, lid, hosted, hosted.lid), bots, groups, broadcast lists and channels
    */
   sender_jid: string;
 }

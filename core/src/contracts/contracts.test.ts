@@ -65,20 +65,51 @@ describe("send-request contract", () => {
     });
   }
 
-  it("builds requests that pass the contract", () => {
-    const request = newSendRequest("919999999999@s.whatsapp.net", "on my way", {
-      wa_id: "3EB0C767D26B5A7F2A1F",
-      sender_jid: "911111111111@s.whatsapp.net",
-    });
-    const encoded = contracts.encodeSendRequest(request);
-    assert.deepEqual(JSON.parse(encoded), request);
-    assert.notEqual(newSendRequest("1@s.whatsapp.net", "x").id, request.id);
+  it("builds requests that pass the contract, with a trimmed text and an expiry", () => {
+    const now = new Date("2026-11-22T09:31:00.000Z");
+    const request = newSendRequest(
+      "919999999999@s.whatsapp.net",
+      "  on my way \n",
+      { kind: "confirmed", action_id: "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d" },
+      {
+        now,
+        ttlMs: 60_000,
+        replyTo: { wa_id: "3EB0C767D26B5A7F2A1F", sender_jid: "911111111111@s.whatsapp.net" },
+      },
+    );
+    assert.equal(request.content.text, "on my way");
+    assert.equal(request.created_at, "2026-11-22T09:31:00.000Z");
+    assert.equal(request.expires_at, "2026-11-22T09:32:00.000Z");
+    assert.deepEqual(JSON.parse(contracts.encodeSendRequest(request)), request);
+    assert.notEqual(newSendRequest("1@s.whatsapp.net", "x", { kind: "self_chat" }).id, request.id);
   });
 
   it("refuses to encode a request that breaks the contract", () => {
+    for (const to of ["+919999999999", "status@broadcast", "1@newsletter"]) {
+      assert.throws(
+        () => contracts.encodeSendRequest(newSendRequest(to, "hi", { kind: "self_chat" })),
+        ContractError,
+        to,
+      );
+    }
     assert.throws(
-      () => contracts.encodeSendRequest(newSendRequest("+919999999999", "hi")),
+      () =>
+        contracts.encodeSendRequest(
+          newSendRequest("1@s.whatsapp.net", "   ", { kind: "self_chat" }),
+        ),
       ContractError,
+    );
+  });
+
+  it("never puts payload values in its errors", () => {
+    const [, raw] =
+      samples("send-request", "invalid").find(([n]) => n === "phone-number-not-jid") ?? [];
+    assert.throws(
+      () => contracts.parseSendRequest(raw),
+      (err: unknown) =>
+        err instanceof ContractError &&
+        err.message.includes("/to") &&
+        !err.message.includes("+9199"),
     );
   });
 });
