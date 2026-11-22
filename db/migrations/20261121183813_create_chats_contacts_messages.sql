@@ -121,7 +121,7 @@ BEGIN
   END IF;
   SELECT * INTO STRICT gone_row FROM contacts WHERE id = gone FOR UPDATE;
   SELECT * INTO STRICT keep_row FROM contacts WHERE id = keep FOR UPDATE;
-  IF keep_row.lid <> gone_row.lid OR keep_row.pn <> gone_row.pn OR keep_row.bot <> gone_row.bot THEN
+  IF keep_row.lid <> gone_row.lid OR keep_row.bot <> gone_row.bot THEN
     RAISE EXCEPTION 'contacts % and % have different addresses and are not the same person', keep, gone
       USING ERRCODE = 'unique_violation';
   END IF;
@@ -203,9 +203,8 @@ COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into k
 CREATE FUNCTION contact_id_for(p_lid text, p_pn text, p_bot text DEFAULT NULL) RETURNS bigint
 LANGUAGE plpgsql AS $$
 DECLARE
-  ids bigint[];
   keep bigint;
-  other bigint;
+  found_row contacts;
 BEGIN
   IF num_nonnulls(p_lid, p_pn, p_bot) = 0 THEN
     RAISE EXCEPTION 'contact_id_for needs a LID, a phone-number JID or a bot JID'
@@ -213,35 +212,51 @@ BEGIN
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext('kaya.contacts'));
 
-  SELECT array_agg(id ORDER BY id) INTO ids
-  FROM contacts
-  WHERE lid = p_lid OR pn = p_pn OR bot = p_bot;
+  IF p_lid IS NOT NULL THEN
+    SELECT id INTO keep FROM contacts WHERE lid = p_lid;
+  END IF;
 
-  IF ids IS NULL THEN
+  IF p_pn IS NOT NULL THEN
+    SELECT * INTO found_row FROM contacts WHERE pn = p_pn;
+    IF FOUND AND found_row.id IS DISTINCT FROM keep THEN
+      IF p_lid IS NOT NULL AND found_row.lid IS NOT NULL THEN
+        UPDATE contacts SET pn = NULL WHERE id = found_row.id;
+      ELSIF keep IS NULL THEN
+        keep := found_row.id;
+      ELSE
+        PERFORM merge_contacts(LEAST(keep, found_row.id), GREATEST(keep, found_row.id));
+        keep := LEAST(keep, found_row.id);
+      END IF;
+    END IF;
+  END IF;
+
+  IF p_bot IS NOT NULL THEN
+    SELECT * INTO found_row FROM contacts WHERE bot = p_bot;
+    IF FOUND AND found_row.id IS DISTINCT FROM keep THEN
+      IF keep IS NULL THEN
+        keep := found_row.id;
+      ELSE
+        PERFORM merge_contacts(LEAST(keep, found_row.id), GREATEST(keep, found_row.id));
+        keep := LEAST(keep, found_row.id);
+      END IF;
+    END IF;
+  END IF;
+
+  IF keep IS NULL THEN
     INSERT INTO contacts (lid, pn, bot) VALUES (p_lid, p_pn, p_bot) RETURNING id INTO keep;
     RETURN keep;
   END IF;
 
-  keep := ids[1];
-  FOREACH other IN ARRAY ids[2:] LOOP
-    PERFORM merge_contacts(keep, other);
-  END LOOP;
-  PERFORM 1 FROM contacts
-  WHERE id = keep AND (lid <> p_lid OR pn <> p_pn OR bot <> p_bot);
-  IF FOUND THEN
-    RAISE EXCEPTION 'contact % already has a different address than the ones given', keep
-      USING ERRCODE = 'unique_violation';
-  END IF;
   UPDATE contacts SET
     lid = COALESCE(lid, p_lid),
-    pn = COALESCE(pn, p_pn),
+    pn = COALESCE(p_pn, pn),
     bot = COALESCE(bot, p_bot)
   WHERE id = keep;
   RETURN keep;
 END
 $$;
 
-COMMENT ON FUNCTION contact_id_for(text, text, text) IS 'The contact for whatever addresses are known (pass device-less JIDs). Creates it, fills in a newly learned address, or merges rows that turn out to be one person.';
+COMMENT ON FUNCTION contact_id_for(text, text, text) IS 'The contact for whatever addresses are known (pass device-less JIDs). The LID is the account and the phone number can move: a number seen with a new LID leaves its previous account, a known LID seen with a new number takes it. Rows with no LID are merged into the account they turn out to be.';
 
 -- migrate:down
 DROP FUNCTION contact_id_for(text, text, text);
