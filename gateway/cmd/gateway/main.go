@@ -40,7 +40,7 @@ func main() {
 	}
 	logger := logging.New(os.Stdout, cfg.LogLevel, "service", "gateway", "version", version)
 	if err := run(cfg, logger); err != nil {
-		logger.Log(context.Background(), logging.LevelFatal, "gateway failed", "error", err.Error())
+		logger.Log(context.Background(), logging.LevelFatal, "gateway failed", logging.Err(err))
 		os.Exit(1)
 	}
 }
@@ -73,7 +73,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := db.Check(checkCtx); err != nil {
-		logger.Warn("db not reachable at startup; health reports it until it is", "error", err.Error())
+		logger.Warn("db not reachable at startup; health reports it until it is", logging.Err(err))
 	}
 	cancel()
 

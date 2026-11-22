@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 )
@@ -81,5 +82,15 @@ func TestContextLogger(t *testing.T) {
 	inCtx := slog.New(slog.DiscardHandler)
 	if FromContext(WithLogger(context.Background(), inCtx), fallback) != inCtx {
 		t.Fatal("expected the logger from context")
+	}
+}
+
+func TestErrUsesTheSameKeyAsCore(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "info").Error("failed", Err(errors.New("boom")))
+	lines := decode(t, &buf)
+	errField, ok := lines[0]["err"].(map[string]any)
+	if !ok || errField["message"] != "boom" || errField["type"] != "*errors.errorString" {
+		t.Fatalf("unexpected err field: %v", lines[0])
 	}
 }

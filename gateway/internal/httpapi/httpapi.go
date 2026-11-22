@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/dhananjay6561/kaya/gateway/internal/logging"
 )
 
 // Checker reports whether one dependency works.
@@ -67,7 +69,7 @@ func health(o Options) http.HandlerFunc {
 				result := checkResult{Status: "ok", DurationMS: time.Since(start).Milliseconds()}
 				if err != nil {
 					result.Status = "down"
-					loggerFrom(r.Context(), o.Logger).Warn("health check failed", "check", name, "error", err.Error())
+					loggerFrom(r.Context(), o.Logger).Warn("health check failed", "check", name, logging.Err(err))
 				}
 				mu.Lock()
 				defer mu.Unlock()

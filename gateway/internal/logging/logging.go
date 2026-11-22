@@ -3,6 +3,7 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -66,4 +67,12 @@ func FromContext(ctx context.Context, fallback *slog.Logger) *slog.Logger {
 		return logger
 	}
 	return fallback
+}
+
+// Err logs err under the same "err" key and fields core uses: type and message.
+func Err(err error) slog.Attr {
+	if err == nil {
+		return slog.Attr{}
+	}
+	return slog.Group("err", slog.String("type", fmt.Sprintf("%T", err)), slog.String("message", err.Error()))
 }
