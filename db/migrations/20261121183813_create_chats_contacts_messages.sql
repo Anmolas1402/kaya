@@ -88,6 +88,8 @@ COMMENT ON COLUMN messages.body IS 'Text, or the caption of a media message; nul
 COMMENT ON COLUMN messages.source IS 'live: received while connected; history: from the history sync';
 
 CREATE INDEX messages_chat_sent_at_idx ON messages (chat_id, sent_at DESC);
+CREATE INDEX messages_sender_id_idx ON messages (sender_id);
+CREATE INDEX messages_reply_to_sender_id_idx ON messages (reply_to_sender_id) WHERE reply_to_sender_id IS NOT NULL;
 
 CREATE TRIGGER messages_set_updated_at BEFORE UPDATE ON messages
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
