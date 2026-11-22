@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"time"
 
 	"github.com/dhananjay6561/kaya/gateway/internal/logging"
@@ -43,12 +45,14 @@ func withRequestID(next http.Handler, logger *slog.Logger) http.Handler {
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	wrote  bool
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
 	if s.status == 0 {
 		s.status = code
 	}
+	s.wrote = true
 	s.ResponseWriter.WriteHeader(code)
 }
 
@@ -56,6 +60,7 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	if s.status == 0 {
 		s.status = http.StatusOK
 	}
+	s.wrote = true
 	return s.ResponseWriter.Write(b)
 }
 
@@ -63,35 +68,56 @@ func withLogging(next http.Handler, fallback *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w}
+		aborted := true
+		defer func() {
+			status := rec.status
+			if aborted {
+				status = http.StatusInternalServerError
+			}
+			level := slog.LevelInfo
+			switch {
+			case r.URL.Path == "/health" && !aborted:
+				level = slog.LevelDebug
+			case status >= 500:
+				level = slog.LevelError
+			}
+			loggerFrom(r.Context(), fallback).Log(r.Context(), level, "http request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", status,
+				"aborted", aborted,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
+		}()
 		next.ServeHTTP(rec, r)
-
-		level := slog.LevelInfo
-		switch {
-		case rec.status >= 500:
-			level = slog.LevelError
-		case r.URL.Path == "/health":
-			level = slog.LevelDebug
-		}
-		loggerFrom(r.Context(), fallback).Log(r.Context(), level, "http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
+		aborted = false
 	})
 }
 
 func withRecover(next http.Handler, fallback *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec, ok := w.(*statusRecorder)
+		if !ok {
+			rec = &statusRecorder{ResponseWriter: w}
+		}
 		defer func() {
-			if v := recover(); v != nil {
-				if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
-					panic(v)
-				}
-				loggerFrom(r.Context(), fallback).Error("panic in handler", "panic", v, "path", r.URL.Path)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			v := recover()
+			if v == nil {
+				return
 			}
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+				panic(v)
+			}
+			loggerFrom(r.Context(), fallback).Error("panic in handler",
+				"panic", fmt.Sprint(v),
+				"path", r.URL.Path,
+				"stack", string(debug.Stack()),
+			)
+			if rec.wrote {
+				panic(http.ErrAbortHandler)
+			}
+			writeJSON(rec, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(rec, r)
 	})
 }
