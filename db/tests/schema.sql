@@ -107,6 +107,43 @@ $$;
 
 DO $$
 DECLARE
+  by_pn bigint := contact_id_for(NULL, '917777777777@s.whatsapp.net');
+  by_lid bigint := contact_id_for('100000000000007@lid', NULL);
+  pn_chat bigint;
+  lid_chat bigint;
+  merged bigint;
+  n int;
+BEGIN
+  INSERT INTO chats (kind, contact_id) VALUES ('direct', by_pn) RETURNING id INTO pn_chat;
+  INSERT INTO chats (kind, contact_id) VALUES ('direct', by_lid) RETURNING id INTO lid_chat;
+  INSERT INTO messages (chat_id, wa_id, sender_id, from_me, sent_at, kind, body, source)
+  VALUES
+    (pn_chat, 'TESTREVOKE', by_pn, false, now(), 'text', 'secret', 'history'),
+    (lid_chat, 'TESTREVOKE', by_lid, false, now(), 'text', 'secret', 'live'),
+    (pn_chat, 'TESTEDIT', by_pn, false, now(), 'text', 'first', 'history'),
+    (lid_chat, 'TESTEDIT', by_lid, false, now(), 'text', 'first', 'live'),
+    (pn_chat, 'TESTBOTH', by_pn, false, now(), 'text', 'same', 'history'),
+    (lid_chat, 'TESTBOTH', by_pn, false, now(), 'text', 'same', 'live'),
+    (lid_chat, 'TESTBOTH', by_lid, false, now(), 'text', 'same', 'live');
+  UPDATE messages SET body = NULL, deleted_at = now() WHERE wa_id = 'TESTREVOKE' AND sender_id = by_lid;
+  UPDATE messages SET body = 'second', edited_at = now() WHERE wa_id = 'TESTEDIT' AND sender_id = by_lid;
+
+  merged := contact_id_for('100000000000007@lid', '917777777777@s.whatsapp.net');
+
+  SELECT count(*) INTO n FROM messages WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH');
+  ASSERT n = 3, 'every spelling of a message becomes one row, even when one chat held several';
+  PERFORM 1 FROM messages WHERE wa_id = 'TESTREVOKE' AND deleted_at IS NOT NULL AND body IS NULL;
+  ASSERT FOUND, 'a revoke on either copy survives the merge';
+  PERFORM 1 FROM messages WHERE wa_id = 'TESTEDIT' AND edited_at IS NOT NULL AND body = 'second';
+  ASSERT FOUND, 'the latest edit on either copy survives the merge';
+  SELECT count(*) INTO n FROM messages
+  WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH') AND (sender_id <> merged OR chat_id NOT IN (pn_chat, lid_chat));
+  ASSERT n = 0, 'survivors point at the merged contact';
+END
+$$;
+
+DO $$
+DECLARE
   dj bigint := contact_id_for(NULL, '919000000000@s.whatsapp.net');
   bot bigint := contact_id_for(NULL, NULL, '13135550002@bot');
   hosted bigint := contact_id_for('200000000000001@hosted.lid', '914444444444@hosted');

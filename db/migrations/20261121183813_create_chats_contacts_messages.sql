@@ -134,24 +134,40 @@ BEGIN
     gone_chat := NULL;
   END IF;
 
-  DELETE FROM messages m
-  USING messages k
-  WHERE m.sender_id = gone
-    AND k.sender_id = keep
-    AND k.wa_id = m.wa_id
-    AND k.chat_id = CASE WHEN m.chat_id = gone_chat THEN keep_chat ELSE m.chat_id END;
-  UPDATE messages SET sender_id = keep WHERE sender_id = gone;
+  CREATE TEMP TABLE merged_messages ON COMMIT DROP AS
+  SELECT id, body, edited_at, deleted_at,
+    first_value(id) OVER w AS survivor,
+    count(*) OVER w AS copies
+  FROM messages
+  WHERE sender_id IN (keep, gone) OR chat_id IN (keep_chat, gone_chat)
+  WINDOW w AS (
+    PARTITION BY
+      CASE WHEN chat_id = gone_chat THEN keep_chat ELSE chat_id END,
+      wa_id,
+      CASE WHEN sender_id = gone THEN keep ELSE sender_id END
+    ORDER BY (sender_id <> gone AND chat_id IS DISTINCT FROM gone_chat) DESC, id
+  );
+  UPDATE messages m SET
+    deleted_at = f.deleted_at,
+    edited_at = f.edited_at,
+    body = CASE WHEN f.deleted_at IS NULL THEN f.body END
+  FROM (
+    SELECT survivor,
+      max(deleted_at) AS deleted_at,
+      max(edited_at) AS edited_at,
+      (array_agg(body ORDER BY edited_at DESC NULLS LAST, id = survivor DESC))[1] AS body
+    FROM merged_messages
+    WHERE copies > 1
+    GROUP BY survivor
+  ) f
+  WHERE m.id = f.survivor;
+  DELETE FROM messages WHERE id IN (SELECT id FROM merged_messages WHERE id <> survivor);
+  DROP TABLE merged_messages;
+  UPDATE messages SET
+    chat_id = CASE WHEN chat_id = gone_chat THEN keep_chat ELSE chat_id END,
+    sender_id = CASE WHEN sender_id = gone THEN keep ELSE sender_id END
+  WHERE sender_id = gone OR chat_id = gone_chat;
   UPDATE messages SET reply_to_sender_id = keep WHERE reply_to_sender_id = gone;
-
-  IF gone_chat IS NOT NULL THEN
-    DELETE FROM messages m
-    USING messages k
-    WHERE m.chat_id = gone_chat
-      AND k.chat_id = keep_chat
-      AND k.wa_id = m.wa_id
-      AND k.sender_id = m.sender_id;
-    UPDATE messages SET chat_id = keep_chat WHERE chat_id = gone_chat;
-  END IF;
 
   CREATE TEMP TABLE merged_reactions ON COMMIT DROP AS
   SELECT DISTINCT ON (chat_id, target_wa_id, target_sender_id, sender_id)
@@ -198,7 +214,7 @@ BEGIN
 END
 $$;
 
-COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into keep: their direct chats, messages and reactions become one, duplicates are dropped, and gone is deleted.';
+COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into keep: their direct chats, messages and reactions become one, and gone is deleted. Duplicate copies of a message collapse into one row that keeps any revoke and the latest edit. Refuses two different LIDs or bots; the caller sets the current phone number.';
 
 CREATE FUNCTION contact_id_for(p_lid text, p_pn text, p_bot text DEFAULT NULL) RETURNS bigint
 LANGUAGE plpgsql AS $$
