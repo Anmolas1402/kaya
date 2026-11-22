@@ -59,8 +59,9 @@ Folders appear when a phase needs them; empty placeholders are not committed.
 - One schema, in `db/migrations/`, as plain SQL run by dbmate before the services start. Neither
   language runs its own migration system.
 - whatsmeow manages its own session tables; nothing else touches them.
-- `gateway` writes chats, contacts and messages. `core` reads them and owns everything it creates
-  (tasks, jobs, pending actions, usage).
+- `gateway` writes contacts, chats, messages and reactions. It resolves every person through
+  `contact_id_for()`, never by inserting into `contacts` directly. `core` reads them and owns
+  everything it creates (tasks, jobs, pending actions, usage).
 
 ## Engineering standards
 
