@@ -24,32 +24,38 @@ function exitOnCrash(logger: Logger): void {
 }
 
 async function run(config: Config, logger: Logger): Promise<void> {
+  const stopping = stopSignal();
   const db = createDb(config.databaseUrl, logger);
   try {
-    await db.check(AbortSignal.timeout(5_000));
-  } catch (err) {
-    logger.warn({ err }, "db not reachable at startup; health reports it until it is");
+    try {
+      await db.check(AbortSignal.timeout(5_000));
+    } catch (err) {
+      logger.warn({ err }, "db not reachable at startup; health reports it until it is");
+    }
+
+    const server = await startHttpServer({
+      host: config.listenHost,
+      port: config.port,
+      logger,
+      routes: { "/health": createHealthRoute({ service: "core", version, checks: { db } }) },
+    });
+    try {
+      logger.info(
+        {
+          addr: `${config.listenHost}:${server.port}`,
+          llm: config.llm.provider,
+          data_dir: config.dataDir,
+        },
+        "core started",
+      );
+      const signal = await stopping;
+      logger.info({ signal }, "core stopping");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await db.close();
   }
-
-  const server = await startHttpServer({
-    host: config.listenHost,
-    port: config.port,
-    logger,
-    routes: { "/health": createHealthRoute({ service: "core", version, checks: { db } }) },
-  });
-  logger.info(
-    {
-      addr: `${config.listenHost}:${server.port}`,
-      llm: config.llm.provider,
-      data_dir: config.dataDir,
-    },
-    "core started",
-  );
-
-  const signal = await stopSignal();
-  logger.info({ signal }, "core stopping");
-  await server.close();
-  await db.close();
   logger.info("core stopped");
 }
 
