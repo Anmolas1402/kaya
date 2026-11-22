@@ -8,17 +8,22 @@ END
 $$;
 
 CREATE TABLE contacts (
-  jid text PRIMARY KEY CHECK (jid LIKE '_%@_%'),
-  lid text UNIQUE CHECK (lid LIKE '_%@lid'),
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  lid text UNIQUE CHECK (lid ~ '^[0-9]+@(lid|hosted\.lid)$'),
+  pn text UNIQUE CHECK (pn ~ '^[0-9]+@(s\.whatsapp\.net|hosted)$'),
+  bot text UNIQUE CHECK (bot ~ '^[0-9]+@bot$'),
   saved_name text,
   first_name text,
   push_name text,
   business_name text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (num_nonnulls(lid, pn, bot) > 0)
 );
 
-COMMENT ON COLUMN contacts.jid IS 'Phone-number JID (number@s.whatsapp.net), or the LID when no number is known';
+COMMENT ON TABLE contacts IS 'One row per person or bot, however WhatsApp addresses them. Write through contact_id_for(), which merges rows once a LID and a phone number are known to be the same person.';
+COMMENT ON COLUMN contacts.lid IS 'LID JID without a device part';
+COMMENT ON COLUMN contacts.pn IS 'Phone-number JID without a device part';
 COMMENT ON COLUMN contacts.saved_name IS 'Name in DJ''s address book';
 COMMENT ON COLUMN contacts.push_name IS 'Name the contact set for themselves';
 
@@ -26,24 +31,37 @@ CREATE TRIGGER contacts_set_updated_at BEFORE UPDATE ON contacts
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE chats (
-  jid text PRIMARY KEY CHECK (jid LIKE '_%@_%'),
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   kind text NOT NULL CHECK (kind IN ('direct', 'group', 'broadcast', 'newsletter')),
+  contact_id bigint UNIQUE REFERENCES contacts (id),
+  jid text UNIQUE,
   name text,
   last_message_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((kind = 'direct') = (contact_id IS NOT NULL)),
+  CHECK ((kind = 'direct') = (jid IS NULL)),
+  CHECK (
+    CASE kind
+      WHEN 'group' THEN jid ~ '^[0-9]+(-[0-9]+)?@g\.us$'
+      WHEN 'broadcast' THEN jid ~ '^([0-9]+|status)@broadcast$'
+      WHEN 'newsletter' THEN jid ~ '^[0-9]+@newsletter$'
+      ELSE true
+    END
+  )
 );
 
-COMMENT ON COLUMN chats.name IS 'Group subject; empty for direct chats, whose name comes from contacts';
+COMMENT ON TABLE chats IS 'A direct chat is identified by its contact, so the LID and phone-number spellings of one DM are the same chat. Other kinds are identified by their JID.';
+COMMENT ON COLUMN chats.name IS 'Group, broadcast list or channel name; empty for direct chats, whose name comes from contacts';
 
 CREATE TRIGGER chats_set_updated_at BEFORE UPDATE ON chats
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE messages (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  chat_jid text NOT NULL REFERENCES chats (jid) ON DELETE CASCADE,
-  sender_jid text NOT NULL CHECK (sender_jid LIKE '_%@_%'),
-  wa_id text NOT NULL CHECK (wa_id <> ''),
+  chat_id bigint NOT NULL REFERENCES chats (id) ON DELETE CASCADE,
+  wa_id text NOT NULL CHECK (wa_id ~ '^[[:alnum:]._-]{1,128}$'),
+  sender_id bigint NOT NULL REFERENCES contacts (id),
   from_me boolean NOT NULL,
   sent_at timestamptz NOT NULL,
   kind text NOT NULL CHECK (
@@ -53,27 +71,182 @@ CREATE TABLE messages (
     )
   ),
   body text,
-  reply_to_wa_id text,
+  reply_to_wa_id text CHECK (reply_to_wa_id ~ '^[[:alnum:]._-]{1,128}$'),
+  reply_to_sender_id bigint REFERENCES contacts (id),
   source text NOT NULL CHECK (source IN ('live', 'history')),
   edited_at timestamptz,
   deleted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (chat_jid, sender_jid, wa_id)
+  UNIQUE (chat_id, wa_id, sender_id),
+  CHECK ((reply_to_wa_id IS NULL) = (reply_to_sender_id IS NULL))
 );
 
+COMMENT ON TABLE messages IS 'One row per message. Edits and revokes update the row they point at (body, edited_at, deleted_at) and are not stored as rows of their own. Reactions live in reactions.';
 COMMENT ON COLUMN messages.wa_id IS 'WhatsApp message id; unique together with chat and sender';
-COMMENT ON COLUMN messages.body IS 'Text, or the caption of a media message';
+COMMENT ON COLUMN messages.body IS 'Text, or the caption of a media message; null once revoked';
 COMMENT ON COLUMN messages.source IS 'live: received while connected; history: from the history sync';
 
-CREATE INDEX messages_chat_sent_at_idx ON messages (chat_jid, sent_at DESC);
-CREATE INDEX messages_sender_sent_at_idx ON messages (sender_jid, sent_at DESC);
-CREATE INDEX messages_sent_at_idx ON messages (sent_at DESC);
+CREATE INDEX messages_chat_sent_at_idx ON messages (chat_id, sent_at DESC);
 
 CREATE TRIGGER messages_set_updated_at BEFORE UPDATE ON messages
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE reactions (
+  chat_id bigint NOT NULL REFERENCES chats (id) ON DELETE CASCADE,
+  target_wa_id text NOT NULL CHECK (target_wa_id ~ '^[[:alnum:]._-]{1,128}$'),
+  target_sender_id bigint NOT NULL REFERENCES contacts (id),
+  sender_id bigint NOT NULL REFERENCES contacts (id),
+  emoji text NOT NULL CHECK (emoji <> ''),
+  reacted_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (chat_id, target_wa_id, target_sender_id, sender_id)
+);
+
+COMMENT ON TABLE reactions IS 'The current reaction of each sender to a message. Removing a reaction deletes the row. No foreign key to messages, because a reaction can arrive before the message it targets.';
+
+CREATE TRIGGER reactions_set_updated_at BEFORE UPDATE ON reactions
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE FUNCTION merge_contacts(keep bigint, gone bigint) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  gone_row contacts;
+  keep_row contacts;
+  keep_chat bigint;
+  gone_chat bigint;
+BEGIN
+  IF keep = gone THEN
+    RETURN;
+  END IF;
+  SELECT * INTO STRICT gone_row FROM contacts WHERE id = gone FOR UPDATE;
+  SELECT * INTO STRICT keep_row FROM contacts WHERE id = keep FOR UPDATE;
+  IF keep_row.lid <> gone_row.lid OR keep_row.pn <> gone_row.pn OR keep_row.bot <> gone_row.bot THEN
+    RAISE EXCEPTION 'contacts % and % have different addresses and are not the same person', keep, gone
+      USING ERRCODE = 'unique_violation';
+  END IF;
+
+  SELECT id INTO keep_chat FROM chats WHERE contact_id = keep;
+  SELECT id INTO gone_chat FROM chats WHERE contact_id = gone;
+  IF gone_chat IS NOT NULL AND keep_chat IS NULL THEN
+    UPDATE chats SET contact_id = keep WHERE id = gone_chat;
+    keep_chat := gone_chat;
+    gone_chat := NULL;
+  END IF;
+
+  DELETE FROM messages m
+  USING messages k
+  WHERE m.sender_id = gone
+    AND k.sender_id = keep
+    AND k.wa_id = m.wa_id
+    AND k.chat_id = CASE WHEN m.chat_id = gone_chat THEN keep_chat ELSE m.chat_id END;
+  UPDATE messages SET sender_id = keep WHERE sender_id = gone;
+  UPDATE messages SET reply_to_sender_id = keep WHERE reply_to_sender_id = gone;
+
+  IF gone_chat IS NOT NULL THEN
+    DELETE FROM messages m
+    USING messages k
+    WHERE m.chat_id = gone_chat
+      AND k.chat_id = keep_chat
+      AND k.wa_id = m.wa_id
+      AND k.sender_id = m.sender_id;
+    UPDATE messages SET chat_id = keep_chat WHERE chat_id = gone_chat;
+  END IF;
+
+  CREATE TEMP TABLE merged_reactions ON COMMIT DROP AS
+  SELECT DISTINCT ON (chat_id, target_wa_id, target_sender_id, sender_id)
+    chat_id, target_wa_id, target_sender_id, sender_id, emoji, reacted_at
+  FROM (
+    SELECT
+      CASE WHEN chat_id = gone_chat THEN keep_chat ELSE chat_id END AS chat_id,
+      target_wa_id,
+      CASE WHEN target_sender_id = gone THEN keep ELSE target_sender_id END AS target_sender_id,
+      CASE WHEN sender_id = gone THEN keep ELSE sender_id END AS sender_id,
+      emoji,
+      reacted_at
+    FROM reactions
+    WHERE chat_id = gone_chat OR target_sender_id = gone OR sender_id = gone
+       OR chat_id = keep_chat OR target_sender_id = keep OR sender_id = keep
+  ) r
+  ORDER BY chat_id, target_wa_id, target_sender_id, sender_id, reacted_at DESC;
+  DELETE FROM reactions
+  WHERE chat_id = gone_chat OR target_sender_id = gone OR sender_id = gone
+     OR chat_id = keep_chat OR target_sender_id = keep OR sender_id = keep;
+  INSERT INTO reactions (chat_id, target_wa_id, target_sender_id, sender_id, emoji, reacted_at)
+  SELECT chat_id, target_wa_id, target_sender_id, sender_id, emoji, reacted_at
+  FROM merged_reactions;
+  DROP TABLE merged_reactions;
+
+  IF gone_chat IS NOT NULL THEN
+    UPDATE chats k
+    SET last_message_at = GREATEST(k.last_message_at, o.last_message_at)
+    FROM chats o
+    WHERE k.id = keep_chat AND o.id = gone_chat;
+    DELETE FROM chats WHERE id = gone_chat;
+  END IF;
+
+  DELETE FROM contacts WHERE id = gone;
+  UPDATE contacts SET
+    lid = COALESCE(lid, gone_row.lid),
+    pn = COALESCE(pn, gone_row.pn),
+    bot = COALESCE(bot, gone_row.bot),
+    saved_name = COALESCE(saved_name, gone_row.saved_name),
+    first_name = COALESCE(first_name, gone_row.first_name),
+    push_name = COALESCE(push_name, gone_row.push_name),
+    business_name = COALESCE(business_name, gone_row.business_name)
+  WHERE id = keep;
+END
+$$;
+
+COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into keep: their direct chats, messages and reactions become one, duplicates are dropped, and gone is deleted.';
+
+CREATE FUNCTION contact_id_for(p_lid text, p_pn text, p_bot text DEFAULT NULL) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+  ids bigint[];
+  keep bigint;
+  other bigint;
+BEGIN
+  IF num_nonnulls(p_lid, p_pn, p_bot) = 0 THEN
+    RAISE EXCEPTION 'contact_id_for needs a LID, a phone-number JID or a bot JID'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('kaya.contacts'));
+
+  SELECT array_agg(id ORDER BY id) INTO ids
+  FROM contacts
+  WHERE lid = p_lid OR pn = p_pn OR bot = p_bot;
+
+  IF ids IS NULL THEN
+    INSERT INTO contacts (lid, pn, bot) VALUES (p_lid, p_pn, p_bot) RETURNING id INTO keep;
+    RETURN keep;
+  END IF;
+
+  keep := ids[1];
+  FOREACH other IN ARRAY ids[2:] LOOP
+    PERFORM merge_contacts(keep, other);
+  END LOOP;
+  PERFORM 1 FROM contacts
+  WHERE id = keep AND (lid <> p_lid OR pn <> p_pn OR bot <> p_bot);
+  IF FOUND THEN
+    RAISE EXCEPTION 'contact % already has a different address than the ones given', keep
+      USING ERRCODE = 'unique_violation';
+  END IF;
+  UPDATE contacts SET
+    lid = COALESCE(lid, p_lid),
+    pn = COALESCE(pn, p_pn),
+    bot = COALESCE(bot, p_bot)
+  WHERE id = keep;
+  RETURN keep;
+END
+$$;
+
+COMMENT ON FUNCTION contact_id_for(text, text, text) IS 'The contact for whatever addresses are known (pass device-less JIDs). Creates it, fills in a newly learned address, or merges rows that turn out to be one person.';
+
 -- migrate:down
+DROP FUNCTION contact_id_for(text, text, text);
+DROP FUNCTION merge_contacts(bigint, bigint);
+DROP TABLE reactions;
 DROP TABLE messages;
 DROP TABLE chats;
 DROP TABLE contacts;
