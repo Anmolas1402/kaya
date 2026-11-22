@@ -69,15 +69,39 @@ $$;
 
 DO $$
 DECLARE
-  a bigint := contact_id_for('100000000000003@lid', '913333333333@s.whatsapp.net');
-  b bigint := contact_id_for('100000000000004@lid', NULL);
+  old_owner bigint := contact_id_for('100000000000003@lid', '913333333333@s.whatsapp.net');
+  other bigint := contact_id_for('100000000000004@lid', NULL);
+  new_owner bigint;
+  pn_only bigint;
+  n int;
 BEGIN
-  PERFORM pg_temp.expect_error(
-    $q$SELECT contact_id_for('100000000000004@lid', '913333333333@s.whatsapp.net')$q$, '23505');
-  PERFORM pg_temp.expect_error(
-    $q$SELECT contact_id_for('100000000000009@lid', '913333333333@s.whatsapp.net')$q$, '23505');
+  new_owner := contact_id_for('100000000000009@lid', '913333333333@s.whatsapp.net');
+  ASSERT new_owner NOT IN (old_owner, other), 'a recycled number goes to the account that has it now';
+  PERFORM 1 FROM contacts WHERE id = old_owner AND lid = '100000000000003@lid' AND pn IS NULL;
+  ASSERT FOUND, 'the previous owner keeps its LID and loses the number';
+  ASSERT contact_id_for(NULL, '913333333333@s.whatsapp.net') = new_owner, 'the number now finds the new owner';
+
+  ASSERT contact_id_for('100000000000003@lid', '915555555555@s.whatsapp.net') = old_owner,
+    'an account that changed its number stays the same contact';
+  PERFORM 1 FROM contacts WHERE id = old_owner AND pn = '915555555555@s.whatsapp.net';
+  ASSERT FOUND, 'the new number is recorded';
+
+  ASSERT contact_id_for('100000000000004@lid', '915555555555@s.whatsapp.net') = other,
+    'a number that moved to another account follows it';
+  PERFORM 1 FROM contacts WHERE id = old_owner AND pn IS NULL;
+  ASSERT FOUND, 'the account it moved from loses it';
+
+  pn_only := contact_id_for(NULL, '916666666666@s.whatsapp.net');
+  ASSERT contact_id_for('100000000000004@lid', '916666666666@s.whatsapp.net') = LEAST(other, pn_only),
+    'a phone-only row for an account''s new number is folded into the account';
+  SELECT count(*) INTO n FROM contacts WHERE id IN (other, pn_only);
+  ASSERT n = 1, 'the two rows became one';
+  PERFORM 1 FROM contacts
+  WHERE lid = '100000000000004@lid' AND pn = '916666666666@s.whatsapp.net';
+  ASSERT FOUND, 'the account has its current number';
+
+  PERFORM pg_temp.expect_error(format('SELECT merge_contacts(%s, %s)', old_owner, new_owner), '23505');
   PERFORM pg_temp.expect_error($q$SELECT contact_id_for(NULL, NULL)$q$, '22023');
-  ASSERT a <> b;
 END
 $$;
 
