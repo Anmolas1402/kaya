@@ -137,7 +137,7 @@ BEGIN
   END IF;
 
   CREATE TEMP TABLE merged_messages ON COMMIT DROP AS
-  SELECT id, body, edited_at, deleted_at,
+  SELECT id, body, edited_at, deleted_at, reply_to_wa_id, reply_to_sender_id,
     first_value(id) OVER w AS survivor,
     count(*) OVER w AS copies
   FROM messages
@@ -153,12 +153,16 @@ BEGIN
   UPDATE messages m SET
     deleted_at = f.deleted_at,
     edited_at = f.edited_at,
-    body = CASE WHEN f.deleted_at IS NULL THEN f.body END
+    body = CASE WHEN f.deleted_at IS NULL THEN f.body END,
+    reply_to_wa_id = f.reply_to_wa_id,
+    reply_to_sender_id = f.reply_to_sender_id
   FROM (
     SELECT survivor,
       max(deleted_at) AS deleted_at,
       max(edited_at) AS edited_at,
-      (array_agg(body ORDER BY edited_at DESC NULLS LAST, id = survivor DESC))[1] AS body
+      (array_agg(body ORDER BY edited_at DESC NULLS LAST, id = survivor DESC))[1] AS body,
+      (array_agg(reply_to_wa_id ORDER BY reply_to_wa_id IS NULL, id = survivor DESC, id))[1] AS reply_to_wa_id,
+      (array_agg(reply_to_sender_id ORDER BY reply_to_wa_id IS NULL, id = survivor DESC, id))[1] AS reply_to_sender_id
     FROM merged_messages
     WHERE copies > 1
     GROUP BY survivor
@@ -217,7 +221,7 @@ BEGIN
 END
 $$;
 
-COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into keep: their direct chats, messages and reactions become one, and gone is deleted. Duplicate copies of a message collapse into one row that keeps any revoke and the latest edit. Refuses two different LIDs or bots; the caller sets the current phone number.';
+COMMENT ON FUNCTION merge_contacts(bigint, bigint) IS 'Folds contact gone into keep: their direct chats, messages and reactions become one, and gone is deleted. Duplicate copies of a message collapse into one row that keeps any revoke, the latest edit and a reply link from either copy. Refuses two different LIDs or bots; the caller sets the current phone number.';
 
 CREATE FUNCTION contact_id_for(p_lid text, p_pn text, p_bot text DEFAULT NULL) RETURNS bigint
 LANGUAGE plpgsql AS $$
