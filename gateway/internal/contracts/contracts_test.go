@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	shared "github.com/dhananjay6561/kaya/contracts"
+	"github.com/dhananjay6561/kaya/contracts/samples"
 )
 
 func validator(t *testing.T) *Validator {
@@ -23,16 +23,16 @@ func validator(t *testing.T) *Validator {
 	return v
 }
 
-func samples(t *testing.T, schema, kind string) map[string][]byte {
+func loadSamples(t *testing.T, schema, kind string) map[string][]byte {
 	t.Helper()
-	dir := path.Join("samples/v1", schema, kind)
-	entries, err := fs.ReadDir(shared.Samples, dir)
+	dir := path.Join("v1", schema, kind)
+	entries, err := fs.ReadDir(samples.V1, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := map[string][]byte{}
 	for _, e := range entries {
-		raw, err := fs.ReadFile(shared.Samples, path.Join(dir, e.Name()))
+		raw, err := fs.ReadFile(samples.V1, path.Join(dir, e.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func strict(raw []byte, dst any) error {
 
 func TestValidEventSamplesRoundTripThroughGoTypes(t *testing.T) {
 	v := validator(t)
-	for name, raw := range samples(t, "event", "valid") {
+	for name, raw := range loadSamples(t, "event", "valid") {
 		t.Run(name, func(t *testing.T) {
 			e, err := v.DecodeEvent(raw)
 			if err != nil {
@@ -109,7 +109,7 @@ func TestValidEventSamplesRoundTripThroughGoTypes(t *testing.T) {
 
 func TestInvalidEventSamplesAreRejected(t *testing.T) {
 	v := validator(t)
-	for name, raw := range samples(t, "event", "invalid") {
+	for name, raw := range loadSamples(t, "event", "invalid") {
 		t.Run(name, func(t *testing.T) {
 			if _, err := v.DecodeEvent(raw); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("invalid sample accepted (err=%v)", err)
@@ -120,7 +120,7 @@ func TestInvalidEventSamplesAreRejected(t *testing.T) {
 
 func TestValidSendRequestSamplesRoundTripThroughGoTypes(t *testing.T) {
 	v := validator(t)
-	for name, raw := range samples(t, "send-request", "valid") {
+	for name, raw := range loadSamples(t, "send-request", "valid") {
 		t.Run(name, func(t *testing.T) {
 			r, err := v.DecodeSendRequest(raw)
 			if err != nil {
@@ -144,7 +144,7 @@ func TestValidSendRequestSamplesRoundTripThroughGoTypes(t *testing.T) {
 
 func TestInvalidSendRequestSamplesAreRejected(t *testing.T) {
 	v := validator(t)
-	for name, raw := range samples(t, "send-request", "invalid") {
+	for name, raw := range loadSamples(t, "send-request", "invalid") {
 		t.Run(name, func(t *testing.T) {
 			if _, err := v.DecodeSendRequest(raw); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("invalid sample accepted (err=%v)", err)
@@ -171,24 +171,74 @@ func TestNewEventUsesUTCAndAFreshUUID(t *testing.T) {
 	if a.ID == b.ID {
 		t.Fatal("ids must differ")
 	}
-	if a.OccurredAt.Location() != time.UTC {
-		t.Fatal("time must be UTC")
-	}
 	if _, err := v.EncodeEvent(a); err != nil {
 		t.Fatalf("fresh event rejected: %v", err)
 	}
 }
 
-func TestEncodeEventConvertsLocalTimeToUTC(t *testing.T) {
+func TestEveryTimeFieldEncodesAsUTC(t *testing.T) {
 	v := validator(t)
-	e, _ := NewEvent(EventHistorySynced, HistorySynced{Complete: true})
-	e.OccurredAt = time.Date(2026, 11, 22, 15, 0, 0, 0, time.FixedZone("IST", 5*3600+1800))
+	ist := time.FixedZone("IST", 5*3600+1800)
+	local := time.Date(2026, 11, 22, 15, 0, 0, 123456789, ist)
+	e, err := NewEvent(EventMessageStored, MessageStored{
+		MessageID: 1, ChatID: 1, SenderID: 1, WAID: "X", Kind: "text", Source: "live", Change: "new",
+		SentAt: At(local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.OccurredAt = At(local)
 	raw, err := v.EncodeEvent(e)
 	if err != nil {
-		t.Fatalf("local time should be converted, got %v", err)
+		t.Fatalf("a non-UTC time must still encode, got %v", err)
 	}
-	if !bytes.Contains(raw, []byte(`"occurred_at":"2026-11-22T09:30:00Z"`)) {
-		t.Fatalf("expected UTC time in %s", raw)
+	for _, field := range []string{`"occurred_at":"2026-11-22T09:30:00.123456Z"`, `"sent_at":"2026-11-22T09:30:00.123456Z"`} {
+		if !bytes.Contains(raw, []byte(field)) {
+			t.Errorf("expected %s in %s", field, raw)
+		}
+	}
+
+	req, err := json.Marshal(SendRequest{
+		ID: NewID(), Version: Version, CreatedAt: At(local), ExpiresAt: At(local.Add(time.Minute)),
+		To: "919999999999@s.whatsapp.net", Authorization: Authorization{Kind: AuthSelfChat},
+		Content: TextContent{Type: "text", Text: "hi"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.ValidateSendRequest(req); err != nil {
+		t.Fatalf("send request with local times rejected: %v", err)
+	}
+}
+
+func TestValidationErrorsNeverContainPayloadValues(t *testing.T) {
+	v := validator(t)
+	secrets := map[string]string{
+		"phone-number-not-jid": "+919999999999",
+		"to-status-broadcast":  "status@broadcast",
+	}
+	for name, secret := range secrets {
+		raw := loadSamples(t, "send-request", "invalid")[name]
+		_, err := v.DecodeSendRequest(raw)
+		if err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("%s: error leaks the value: %v", name, err)
+		}
+		if !strings.Contains(err.Error(), "/to ") {
+			t.Errorf("%s: error should name the field: %v", name, err)
+		}
+	}
+
+	e, _ := NewEvent(EventConnectionState, ConnectionState{State: StateConnected, OwnJID: "919999999999:12@s.whatsapp.net"})
+	_, err := v.EncodeEvent(e)
+	var ve *ValidationError
+	if !errors.As(err, &ve) || strings.Contains(err.Error(), "919999999999") {
+		t.Fatalf("expected a value-free ValidationError, got %v", err)
+	}
+	if len(ve.Problems) == 0 || len(ve.Problems) > maxProblems {
+		t.Fatalf("unexpected problems %q", ve.Problems)
 	}
 }
 
