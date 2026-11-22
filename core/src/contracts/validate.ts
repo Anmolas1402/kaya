@@ -57,10 +57,17 @@ export function createContracts(): Contracts {
     return validate;
   };
   const parseEvent = parser<GatewayEvent>("event", compiled("event.schema.json"));
-  const parseSendRequest = parser<SendRequest>(
+  const parseSendRequestShape = parser<SendRequest>(
     "send-request",
     compiled("send-request.schema.json"),
   );
+  const parseSendRequest = (raw: unknown) => {
+    const request = parseSendRequestShape(raw);
+    if (!validTtl(Date.parse(request.expires_at) - Date.parse(request.created_at))) {
+      throw new ContractError("send-request", [expiryProblem]);
+    }
+    return request;
+  };
 
   return Object.freeze({
     parseEvent,
@@ -78,6 +85,13 @@ export type NewSendRequestOptions = Readonly<{
 }>;
 
 export const defaultSendTtlMs = 15 * 60_000;
+export const maxSendTtlMs = 24 * 60 * 60_000;
+
+const expiryProblem = "/expires_at must be after created_at and at most 24 h later";
+
+function validTtl(ms: number): boolean {
+  return Number.isFinite(ms) && ms >= 1 && ms <= maxSendTtlMs;
+}
 
 export function newSendRequest(
   to: string,
@@ -86,11 +100,13 @@ export function newSendRequest(
   options: NewSendRequestOptions = {},
 ): SendRequest {
   const now = options.now ?? new Date();
+  const ttlMs = options.ttlMs ?? defaultSendTtlMs;
+  if (!validTtl(ttlMs)) throw new ContractError("send-request", [expiryProblem]);
   return {
     id: randomUUID(),
     version: 1,
     created_at: now.toISOString(),
-    expires_at: new Date(now.getTime() + (options.ttlMs ?? defaultSendTtlMs)).toISOString(),
+    expires_at: new Date(now.getTime() + ttlMs).toISOString(),
     to,
     authorization,
     content: { type: "text", text: text.trim() },
