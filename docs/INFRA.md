@@ -132,7 +132,8 @@ set a proper device name, back off slowly on reconnects.
   API keys.
 - **Secrets:** `.env` with `chmod 600` (or Docker secrets), never in git.
 - **Disk:** full-disk encryption (LUKS), chosen in the Mint installer.
-- **Updates:** `unattended-upgrades` for OS patches. Container images updated by hand monthly.
+- **Updates:** `unattended-upgrades` for OS patches. Base images are pinned by digest and updated
+  through Dependabot PRs (weekly); rebuild and `make up` after merging one.
 
 ## Data layout on the Victus
 
@@ -157,6 +158,9 @@ includes the WhatsApp session) and `browser-profile`. Keep 7 daily and 4 weekly.
 4. BIOS: cap battery charge at ~80% if HP offers it; turn on "power on after AC loss" if present.
 5. Tailscale, UFW (`deny incoming`), SSH keys only.
 6. Wired Ethernet if possible; laptop stand for airflow.
+7. Create the service data folders and give them to the containers' non-root user:
+   `sudo mkdir -p /srv/kaya/core /srv/kaya/gateway && sudo chown 65532:65532 /srv/kaya/core /srv/kaya/gateway`.
+   On the Mac, Colima maps ownership, so `make up` creating them is enough.
 
 ## Reliability
 
