@@ -51,6 +51,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: the mac override parses
+        run: POSTGRES_PASSWORD=x docker compose -f compose.yml -f compose.mac.yml config --quiet
       - name: write a test .env
         run: |
           cp .env.example .env
