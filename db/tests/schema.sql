@@ -132,6 +132,10 @@ BEGIN
     (lid_chat, 'TESTREVOKEKEPT', by_lid, false, now(), 'text', 'secret', 'live'),
     (pn_chat, 'TESTEDITKEPT', by_pn, false, now(), 'text', 'first', 'history'),
     (lid_chat, 'TESTEDITKEPT', by_lid, false, now(), 'text', 'first', 'live');
+  INSERT INTO messages (chat_id, wa_id, sender_id, from_me, sent_at, kind, body, source, reply_to_wa_id, reply_to_sender_id)
+  VALUES (lid_chat, 'TESTREPLY', by_lid, false, now(), 'text', 'yes', 'live', 'TESTEDIT', by_lid);
+  INSERT INTO messages (chat_id, wa_id, sender_id, from_me, sent_at, kind, body, source)
+  VALUES (pn_chat, 'TESTREPLY', by_pn, false, now(), 'text', 'yes', 'history');
   UPDATE messages SET body = NULL, deleted_at = now() WHERE wa_id = 'TESTREVOKE' AND sender_id = by_lid;
   UPDATE messages SET body = 'second', edited_at = now() WHERE wa_id = 'TESTEDIT' AND sender_id = by_lid;
   UPDATE messages SET body = NULL, deleted_at = now() WHERE wa_id = 'TESTREVOKEKEPT' AND sender_id = by_pn;
@@ -150,6 +154,9 @@ BEGIN
   ASSERT FOUND, 'a revoke on the copy that is kept survives the merge';
   PERFORM 1 FROM messages WHERE wa_id = 'TESTEDITKEPT' AND edited_at IS NOT NULL AND body = 'second';
   ASSERT FOUND, 'an edit on the copy that is kept survives the merge';
+  PERFORM 1 FROM messages
+  WHERE wa_id = 'TESTREPLY' AND reply_to_wa_id = 'TESTEDIT' AND reply_to_sender_id = merged;
+  ASSERT FOUND, 'a reply link on either copy survives the merge';
   SELECT count(*) INTO n FROM messages
   WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH') AND (sender_id <> merged OR chat_id NOT IN (pn_chat, lid_chat));
   ASSERT n = 0, 'survivors point at the merged contact';
