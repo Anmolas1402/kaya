@@ -107,6 +107,9 @@ CREATE TABLE reactions (
 
 COMMENT ON TABLE reactions IS 'The current reaction of each sender to a message. Removing a reaction deletes the row. No foreign key to messages, because a reaction can arrive before the message it targets.';
 
+CREATE INDEX reactions_sender_id_idx ON reactions (sender_id);
+CREATE INDEX reactions_target_sender_id_idx ON reactions (target_sender_id);
+
 CREATE TRIGGER reactions_set_updated_at BEFORE UPDATE ON reactions
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
