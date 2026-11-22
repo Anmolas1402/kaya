@@ -45,8 +45,10 @@ services:
       - ALL
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kaya}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-kaya}?sslmode=disable
+      TEST_DATABASE_URL: postgres://${POSTGRES_USER:-kaya}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/kaya_schema_test?sslmode=disable
       DBMATE_MIGRATIONS_DIR: /db/migrations
       DBMATE_NO_DUMP_SCHEMA: "true"
+      DBMATE_STRICT: "true"
     volumes:
       - ./db/migrations:/db/migrations:ro
     depends_on:
