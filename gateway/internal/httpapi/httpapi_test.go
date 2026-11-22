@@ -144,6 +144,57 @@ func TestRecoverTurnsPanicInto500(t *testing.T) {
 	if !strings.Contains(logs.String(), "panic in handler") {
 		t.Error("panic must be logged")
 	}
+	if !strings.Contains(logs.String(), `"stack":"goroutine`) {
+		t.Error("the panic log must carry the stack trace")
+	}
+}
+
+func TestPanicAfterPartialWriteAbortsTheConnection(t *testing.T) {
+	var logs bytes.Buffer
+	logger := logging.New(&logs, "info")
+	h := withRequestID(withLogging(withRecover(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("partial"))
+		panic("boom")
+	}), logger), logger), logger)
+
+	rec := httptest.NewRecorder()
+	func() {
+		defer func() {
+			if err, ok := recover().(error); !ok || !errors.Is(err, http.ErrAbortHandler) {
+				t.Fatalf("expected http.ErrAbortHandler so the server drops the connection, got %v", err)
+			}
+		}()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", http.NoBody))
+	}()
+	if strings.Contains(rec.Body.String(), "internal error") {
+		t.Error("no second response may be appended to a partial body")
+	}
+	var line map[string]any
+	for _, raw := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var l map[string]any
+		if err := json.Unmarshal([]byte(raw), &l); err == nil && l["msg"] == "http request" {
+			line = l
+		}
+	}
+	if line == nil || line["level"] != "error" || line["aborted"] != true || line["status"] != float64(500) {
+		t.Fatalf("the request log must report an aborted error, got %v", line)
+	}
+}
+
+func TestFailingHealthIsLoggedAtDebug(t *testing.T) {
+	var logs bytes.Buffer
+	h := NewHandler(Options{Logger: logging.New(&logs, "debug"), Checks: map[string]Checker{"db": unhealthy}})
+	get(t, h, "/health", nil)
+	for _, raw := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var l map[string]any
+		if err := json.Unmarshal([]byte(raw), &l); err == nil && l["msg"] == "http request" {
+			if l["level"] != "debug" {
+				t.Fatalf("health requests must stay at debug, got %v", l["level"])
+			}
+			return
+		}
+	}
+	t.Fatal("no request log line")
 }
 
 func TestServeAnswersThenStopsOnCancel(t *testing.T) {
