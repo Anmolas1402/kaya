@@ -13,7 +13,14 @@ export type CompletionRequest = Readonly<{
 
 export type Usage = Readonly<{ inputTokens: number; outputTokens: number }>;
 
-export type Completion = Readonly<{ text: string; model: string; usage: Usage }>;
+export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter";
+
+export type Completion = Readonly<{
+  text: string;
+  model: string;
+  finishReason: FinishReason;
+  usage: Usage;
+}>;
 
 export type CallOptions = Readonly<{ signal?: AbortSignal }>;
 
