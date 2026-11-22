@@ -23,12 +23,40 @@ const (
 	EventSendResult      EventType = "send.result"
 )
 
+// Time is a timestamp that always encodes as UTC with at most microsecond precision, which the
+// contract requires. whatsmeow hands out local times, so every time field uses this type.
+type Time struct {
+	time.Time
+}
+
+// At wraps t.
+func At(t time.Time) Time { return Time{t} }
+
+// MarshalJSON writes t in UTC, e.g. "2026-11-22T09:30:00.123Z".
+func (t Time) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano))
+}
+
+// UnmarshalJSON reads an RFC 3339 time.
+func (t *Time) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return err
+	}
+	t.Time = parsed.UTC()
+	return nil
+}
+
 // Event is the envelope for everything the gateway tells core.
 type Event struct {
 	ID         string          `json:"id"`
 	Version    int             `json:"version"`
 	Type       EventType       `json:"type"`
-	OccurredAt time.Time       `json:"occurred_at"`
+	OccurredAt Time            `json:"occurred_at"`
 	Data       json.RawMessage `json:"data"`
 }
 
@@ -48,17 +76,18 @@ type ConnectionState struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// MessageStored is the data of a message.stored event. The body stays in the database.
+// MessageStored is the data of a message.stored event. It points at database rows; the body stays
+// in the database. Emit it only when the upsert inserted or changed the row.
 type MessageStored struct {
-	MessageID int64     `json:"message_id"`
-	ChatJID   string    `json:"chat_jid"`
-	SenderJID string    `json:"sender_jid"`
-	WAID      string    `json:"wa_id"`
-	FromMe    bool      `json:"from_me"`
-	Kind      string    `json:"kind"`
-	Source    string    `json:"source"`
-	Change    string    `json:"change"`
-	SentAt    time.Time `json:"sent_at"`
+	MessageID int64  `json:"message_id"`
+	ChatID    int64  `json:"chat_id"`
+	SenderID  int64  `json:"sender_id"`
+	WAID      string `json:"wa_id"`
+	FromMe    bool   `json:"from_me"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source"`
+	Change    string `json:"change"`
+	SentAt    Time   `json:"sent_at"`
 }
 
 // HistorySynced is the data of a history.synced event.
@@ -85,12 +114,26 @@ type Error struct {
 
 // SendRequest is a message core asks the gateway to send.
 type SendRequest struct {
-	ID        string      `json:"id"`
-	Version   int         `json:"version"`
-	CreatedAt time.Time   `json:"created_at"`
-	To        string      `json:"to"`
-	Content   TextContent `json:"content"`
-	ReplyTo   *ReplyTo    `json:"reply_to,omitempty"`
+	ID            string        `json:"id"`
+	Version       int           `json:"version"`
+	CreatedAt     Time          `json:"created_at"`
+	ExpiresAt     Time          `json:"expires_at"`
+	To            string        `json:"to"`
+	Authorization Authorization `json:"authorization"`
+	Content       TextContent   `json:"content"`
+	ReplyTo       *ReplyTo      `json:"reply_to,omitempty"`
+}
+
+// Authorization kinds.
+const (
+	AuthSelfChat  = "self_chat"
+	AuthConfirmed = "confirmed"
+)
+
+// Authorization says why a send is allowed: Kaya's own chat with DJ, or a pending action DJ confirmed.
+type Authorization struct {
+	Kind     string `json:"kind"`
+	ActionID string `json:"action_id,omitempty"`
 }
 
 // TextContent is a plain text message body.
@@ -111,7 +154,7 @@ func NewEvent(t EventType, data any) (Event, error) {
 	if err != nil {
 		return Event{}, fmt.Errorf("encode %s data: %w", t, err)
 	}
-	return Event{ID: NewID(), Version: Version, Type: t, OccurredAt: time.Now().UTC(), Data: raw}, nil
+	return Event{ID: NewID(), Version: Version, Type: t, OccurredAt: At(time.Now()), Data: raw}, nil
 }
 
 // NewID returns a random version 4 UUID.

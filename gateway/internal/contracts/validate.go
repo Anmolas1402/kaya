@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -19,6 +19,47 @@ const baseURL = "https://kaya.invalid/contracts/v1/"
 
 // ErrInvalid wraps every payload that does not match its schema.
 var ErrInvalid = errors.New("payload does not match the contract")
+
+// ValidationError lists where a payload broke the contract and which rule it broke. It never includes the
+// payload's values, which can be phone numbers or message text, so it is safe to log.
+type ValidationError struct {
+	Problems []string
+}
+
+func (e *ValidationError) Error() string {
+	return ErrInvalid.Error() + ": " + strings.Join(e.Problems, "; ")
+}
+
+// Unwrap makes errors.Is(err, ErrInvalid) true.
+func (e *ValidationError) Unwrap() error { return ErrInvalid }
+
+const maxProblems = 10
+
+func problems(err error) []string {
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return []string{"/ invalid"}
+	}
+	seen := map[string]bool{}
+	var out []string
+	var walk func(*jsonschema.ValidationError)
+	walk = func(e *jsonschema.ValidationError) {
+		if len(e.Causes) > 0 {
+			for _, c := range e.Causes {
+				walk(c)
+			}
+			return
+		}
+		p := "/" + strings.Join(e.InstanceLocation, "/") + " " + strings.Join(e.ErrorKind.KeywordPath(), "/")
+		if !seen[p] && len(out) < maxProblems {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	walk(ve)
+	sort.Strings(out)
+	return out
+}
 
 // Validator checks payloads against the shared JSON Schemas.
 type Validator struct {
@@ -63,10 +104,10 @@ func NewValidator() (*Validator, error) {
 func validate(s *jsonschema.Schema, raw []byte) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
-		return fmt.Errorf("%w: not JSON: %w", ErrInvalid, err)
+		return &ValidationError{Problems: []string{"/ not JSON"}}
 	}
 	if err := s.Validate(doc); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalid, err)
+		return &ValidationError{Problems: problems(err)}
 	}
 	return nil
 }
@@ -79,7 +120,6 @@ func (v *Validator) ValidateSendRequest(raw []byte) error { return validate(v.se
 
 // EncodeEvent marshals e and refuses to return a payload that breaks the contract.
 func (v *Validator) EncodeEvent(e Event) ([]byte, error) {
-	e.OccurredAt = e.OccurredAt.UTC().Truncate(time.Microsecond)
 	raw, err := json.Marshal(e)
 	if err != nil {
 		return nil, err
@@ -97,7 +137,7 @@ func (v *Validator) DecodeEvent(raw []byte) (Event, error) {
 	}
 	var e Event
 	if err := json.Unmarshal(raw, &e); err != nil {
-		return Event{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return Event{}, &ValidationError{Problems: []string{"/ does not fit the Go types"}}
 	}
 	return e, nil
 }
@@ -109,7 +149,7 @@ func (v *Validator) DecodeSendRequest(raw []byte) (SendRequest, error) {
 	}
 	var r SendRequest
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return SendRequest{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return SendRequest{}, &ValidationError{Problems: []string{"/ does not fit the Go types"}}
 	}
 	return r, nil
 }
