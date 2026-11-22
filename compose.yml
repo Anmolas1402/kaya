@@ -2,6 +2,7 @@ name: kaya
 
 x-service: &service
   restart: unless-stopped
+  stop_grace_period: 15s
   read_only: true
   security_opt:
     - no-new-privileges:true
@@ -17,6 +18,8 @@ services:
   db:
     image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-kaya}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -25,7 +28,7 @@ services:
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql
     shm_size: 256mb
     healthcheck:
-      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -43,6 +46,8 @@ services:
       DATABASE_URL: *database-url
       DATA_DIR: /data
       LISTEN_HOST: 0.0.0.0
+    volumes:
+      - ${DATA_DIR:-./data}/gateway:/data
     healthcheck:
       test: ["CMD", "/gateway", "healthcheck"]
       interval: 10s
@@ -59,9 +64,13 @@ services:
       - path: .env
         required: false
     environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORE_PORT: ${CORE_PORT:-3000}
       DATABASE_URL: *database-url
       DATA_DIR: /data
       LISTEN_HOST: 0.0.0.0
+    volumes:
+      - ${DATA_DIR:-./data}/core:/data
     healthcheck:
       test: ["CMD", "/nodejs/bin/node", "dist/healthcheck.js"]
       interval: 10s
