@@ -4,13 +4,13 @@
   "occurred_at": "2026-11-22T09:30:00Z",
   "type": "message.stored",
   "data": {
-    "message_id": 7,
-    "chat_jid": "120363000000000000@g.us",
-    "sender_jid": "100000000000001@lid",
-    "wa_id": "3EB0C767D26B5A7F2A1F",
+    "message_id": 42,
+    "chat_id": 7,
+    "sender_id": 12,
+    "wa_id": "3EB0 C767",
     "from_me": false,
-    "kind": "voice",
-    "source": "history",
+    "kind": "text",
+    "source": "live",
     "change": "new",
     "sent_at": "2026-11-22T09:29:58Z"
   }

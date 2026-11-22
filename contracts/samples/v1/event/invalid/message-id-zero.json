@@ -5,8 +5,8 @@
   "type": "message.stored",
   "data": {
     "message_id": 0,
-    "chat_jid": "911111111111@s.whatsapp.net",
-    "sender_jid": "911111111111@s.whatsapp.net",
+    "chat_id": 7,
+    "sender_id": 12,
     "wa_id": "3EB0C767D26B5A7F2A1F",
     "from_me": false,
     "kind": "text",
