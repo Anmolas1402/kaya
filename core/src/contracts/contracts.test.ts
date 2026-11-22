@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { generateContractTypes, generatedTypesPath } from "./generate-types.js";
-import { ContractError, createContracts, newSendRequest } from "./index.js";
+import { ContractError, createContracts, maxSendTtlMs, newSendRequest } from "./index.js";
 import { samplesDir } from "./schemas.js";
 
 const contracts = createContracts();
@@ -82,6 +82,23 @@ describe("send-request contract", () => {
     assert.equal(request.expires_at, "2026-11-22T09:32:00.000Z");
     assert.deepEqual(JSON.parse(contracts.encodeSendRequest(request)), request);
     assert.notEqual(newSendRequest("1@s.whatsapp.net", "x", { kind: "self_chat" }).id, request.id);
+  });
+
+  it("refuses an expiry that is not in the future or more than a day away", () => {
+    for (const ttlMs of [0, -60_000, 0.5, Number.NaN, Number.POSITIVE_INFINITY, maxSendTtlMs + 1]) {
+      assert.throws(
+        () => newSendRequest("1@s.whatsapp.net", "hi", { kind: "self_chat" }, { ttlMs }),
+        ContractError,
+        String(ttlMs),
+      );
+    }
+    const longest = newSendRequest(
+      "1@s.whatsapp.net",
+      "hi",
+      { kind: "self_chat" },
+      { ttlMs: maxSendTtlMs },
+    );
+    assert.deepEqual(JSON.parse(contracts.encodeSendRequest(longest)), longest);
   });
 
   it("refuses to encode a request that breaks the contract", () => {

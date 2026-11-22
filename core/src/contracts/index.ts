@@ -4,6 +4,7 @@ export {
   type Contracts,
   createContracts,
   defaultSendTtlMs,
+  maxSendTtlMs,
   type NewSendRequestOptions,
   newSendRequest,
 } from "./validate.js";
