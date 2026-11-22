@@ -4,6 +4,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,22 +17,49 @@ type DB struct {
 }
 
 // Open builds a connection pool for url. It does not connect until the first query.
-func Open(url string) (*DB, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+func Open(dsn string) (*DB, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
-	cfg.MaxConns = 10
-	cfg.MaxConnIdleTime = 5 * time.Minute
-	cfg.HealthCheckPeriod = 30 * time.Second
-	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
-	cfg.ConnConfig.RuntimeParams["application_name"] = "kaya-gateway"
+	set := settingsIn(dsn)
+	if !set["pool_max_conns"] {
+		cfg.MaxConns = 10
+	}
+	if !set["pool_max_conn_idle_time"] {
+		cfg.MaxConnIdleTime = 5 * time.Minute
+	}
+	if !set["pool_health_check_period"] {
+		cfg.HealthCheckPeriod = 30 * time.Second
+	}
+	if !set["connect_timeout"] {
+		cfg.ConnConfig.ConnectTimeout = 5 * time.Second
+	}
+	if !set["application_name"] {
+		cfg.ConnConfig.RuntimeParams["application_name"] = "kaya-gateway"
+	}
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create db pool: %w", err)
 	}
 	return &DB{pool: pool}, nil
+}
+
+func settingsIn(raw string) map[string]bool {
+	set := map[string]bool{}
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
+		for key := range u.Query() {
+			set[key] = true
+		}
+		return set
+	}
+	for _, field := range strings.Fields(raw) {
+		if key, _, ok := strings.Cut(field, "="); ok {
+			set[key] = true
+		}
+	}
+	return set
 }
 
 // Check runs a trivial query to confirm the database answers.
