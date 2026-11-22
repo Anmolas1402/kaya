@@ -60,6 +60,8 @@ Folders appear when a phase needs them; empty placeholders are not committed.
   - `self_chat` may only go to DJ's own JID.
   - `confirmed` needs a pending action (4.6) that exists, is confirmed and targets the same chat.
   - Nothing goes out after `expires_at`; the gateway reports `send.result` failed with `expired`.
+  - `expires_at` must be after `created_at` and at most 24 h later. A schema can't compare two
+    fields, so both validators check this on top of it, and the shared samples cover it.
 
   Media comes later as a new content type.
 - **core → docs / voice:** HTTP requests.
