@@ -34,13 +34,24 @@ async function run(config: Config, logger: Logger): Promise<void> {
     } catch (err) {
       logger.warn({ err }, "db not reachable at startup; health reports it until it is");
     }
+    for (const [kind, provider] of Object.entries(providers)) {
+      if (provider.name === "stub") {
+        logger.warn({ kind }, `${kind} provider is the stub; nothing real happens through it`);
+      }
+    }
     await providers.channel.start();
 
     const server = await startHttpServer({
       host: config.listenHost,
       port: config.port,
       logger,
-      routes: { "/health": createHealthRoute({ service: "core", version, checks: { db } }) },
+      routes: {
+        "/health": createHealthRoute({
+          service: "core",
+          version,
+          checks: { db, channel: providers.channel },
+        }),
+      },
     });
     try {
       logger.info(
