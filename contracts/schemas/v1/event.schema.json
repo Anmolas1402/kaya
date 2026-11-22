@@ -4,7 +4,9 @@
   "title": "GatewayEvent",
   "description": "Something that happened in the gateway, sent to core. Core handles each id at most once.",
   "type": "object",
-  "discriminator": { "propertyName": "type" },
+  "discriminator": {
+    "propertyName": "type"
+  },
   "properties": {
     "type": {
       "enum": ["connection.state", "message.stored", "history.synced", "send.result"]
@@ -12,28 +14,49 @@
   },
   "required": ["type"],
   "oneOf": [
-    { "$ref": "#/$defs/connectionStateEvent" },
-    { "$ref": "#/$defs/messageStoredEvent" },
-    { "$ref": "#/$defs/historySyncedEvent" },
-    { "$ref": "#/$defs/sendResultEvent" }
+    {
+      "$ref": "#/$defs/connectionStateEvent"
+    },
+    {
+      "$ref": "#/$defs/messageStoredEvent"
+    },
+    {
+      "$ref": "#/$defs/historySyncedEvent"
+    },
+    {
+      "$ref": "#/$defs/sendResultEvent"
+    }
   ],
   "$defs": {
     "id": {
-      "description": "Unique per event; the key for at-most-once handling",
+      "description": "Unique per emitted event. It deduplicates redelivery of the same outbox row only; see message.stored for how a repeated WhatsApp message is handled",
       "$ref": "defs.schema.json#/$defs/uuid"
     },
-    "version": { "const": 1 },
-    "occurredAt": { "$ref": "defs.schema.json#/$defs/timestamp" },
-
+    "version": {
+      "const": 1
+    },
+    "occurredAt": {
+      "$ref": "defs.schema.json#/$defs/timestamp"
+    },
     "connectionStateEvent": {
       "title": "ConnectionStateEvent",
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/version" },
-        "type": { "const": "connection.state" },
-        "occurred_at": { "$ref": "#/$defs/occurredAt" },
-        "data": { "$ref": "#/$defs/connectionState" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "type": {
+          "const": "connection.state"
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/occurredAt"
+        },
+        "data": {
+          "$ref": "#/$defs/connectionState"
+        }
       },
       "required": ["id", "version", "type", "occurred_at", "data"],
       "additionalProperties": false
@@ -59,43 +82,71 @@
       "required": ["state"],
       "additionalProperties": false
     },
-
     "messageStoredEvent": {
       "title": "MessageStoredEvent",
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/version" },
-        "type": { "const": "message.stored" },
-        "occurred_at": { "$ref": "#/$defs/occurredAt" },
-        "data": { "$ref": "#/$defs/messageStored" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "type": {
+          "const": "message.stored"
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/occurredAt"
+        },
+        "data": {
+          "$ref": "#/$defs/messageStored"
+        }
       },
       "required": ["id", "version", "type", "occurred_at", "data"],
       "additionalProperties": false
     },
     "messageStored": {
       "title": "MessageStored",
-      "description": "A message row was written. The body stays in the database; core reads it by message_id.",
+      "description": "A message row was inserted or changed. The gateway emits it only when the upsert actually inserted the row or changed it (a redelivered or overlapping copy emits nothing), and the body stays in the database; core reads it by message_id. Core keys command handling on (message_id, change), never on the event id.",
       "type": "object",
       "properties": {
         "message_id": {
-          "description": "messages.id in the database",
-          "type": "integer",
-          "minimum": 1
+          "description": "messages.id",
+          "$ref": "defs.schema.json#/$defs/id"
         },
-        "chat_jid": { "$ref": "defs.schema.json#/$defs/jid" },
-        "sender_jid": { "$ref": "defs.schema.json#/$defs/jid" },
-        "wa_id": { "$ref": "defs.schema.json#/$defs/waId" },
-        "from_me": { "type": "boolean" },
-        "kind": { "$ref": "defs.schema.json#/$defs/messageKind" },
-        "source": { "type": "string", "enum": ["live", "history"] },
-        "change": { "type": "string", "enum": ["new", "edited", "deleted"] },
-        "sent_at": { "$ref": "defs.schema.json#/$defs/timestamp" }
+        "chat_id": {
+          "description": "chats.id",
+          "$ref": "defs.schema.json#/$defs/id"
+        },
+        "sender_id": {
+          "description": "contacts.id of the sender",
+          "$ref": "defs.schema.json#/$defs/id"
+        },
+        "wa_id": {
+          "$ref": "defs.schema.json#/$defs/waId"
+        },
+        "from_me": {
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "defs.schema.json#/$defs/messageKind"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["live", "history"]
+        },
+        "change": {
+          "type": "string",
+          "enum": ["new", "edited", "deleted"]
+        },
+        "sent_at": {
+          "$ref": "defs.schema.json#/$defs/timestamp"
+        }
       },
       "required": [
         "message_id",
-        "chat_jid",
-        "sender_jid",
+        "chat_id",
+        "sender_id",
         "wa_id",
         "from_me",
         "kind",
@@ -105,16 +156,25 @@
       ],
       "additionalProperties": false
     },
-
     "historySyncedEvent": {
       "title": "HistorySyncedEvent",
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/version" },
-        "type": { "const": "history.synced" },
-        "occurred_at": { "$ref": "#/$defs/occurredAt" },
-        "data": { "$ref": "#/$defs/historySynced" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "type": {
+          "const": "history.synced"
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/occurredAt"
+        },
+        "data": {
+          "$ref": "#/$defs/historySynced"
+        }
       },
       "required": ["id", "version", "type", "occurred_at", "data"],
       "additionalProperties": false
@@ -124,29 +184,46 @@
       "description": "One batch of the history sync was stored",
       "type": "object",
       "properties": {
-        "chats": { "type": "integer", "minimum": 0 },
-        "messages": { "type": "integer", "minimum": 0 },
+        "chats": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages": {
+          "type": "integer",
+          "minimum": 0
+        },
         "progress": {
           "description": "Percent of the sync WhatsApp reports as done",
           "type": "integer",
           "minimum": 0,
           "maximum": 100
         },
-        "complete": { "type": "boolean" }
+        "complete": {
+          "type": "boolean"
+        }
       },
       "required": ["chats", "messages", "complete"],
       "additionalProperties": false
     },
-
     "sendResultEvent": {
       "title": "SendResultEvent",
       "type": "object",
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/version" },
-        "type": { "const": "send.result" },
-        "occurred_at": { "$ref": "#/$defs/occurredAt" },
-        "data": { "$ref": "#/$defs/sendResult" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "type": {
+          "const": "send.result"
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/occurredAt"
+        },
+        "data": {
+          "$ref": "#/$defs/sendResult"
+        }
       },
       "required": ["id", "version", "type", "occurred_at", "data"],
       "additionalProperties": false
@@ -156,19 +233,42 @@
       "description": "What happened to a send request",
       "type": "object",
       "properties": {
-        "request_id": { "$ref": "defs.schema.json#/$defs/uuid" },
-        "status": { "type": "string", "enum": ["sent", "failed"] },
+        "request_id": {
+          "$ref": "defs.schema.json#/$defs/uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["sent", "failed"]
+        },
         "wa_id": {
           "description": "Id of the sent message; present when status is sent",
           "$ref": "defs.schema.json#/$defs/waId"
         },
-        "error": { "$ref": "defs.schema.json#/$defs/error" }
+        "error": {
+          "$ref": "defs.schema.json#/$defs/error"
+        }
       },
       "required": ["request_id", "status"],
       "additionalProperties": false,
-      "if": { "properties": { "status": { "const": "sent" } } },
-      "then": { "required": ["wa_id"], "properties": { "error": false } },
-      "else": { "required": ["error"], "properties": { "wa_id": false } }
+      "if": {
+        "properties": {
+          "status": {
+            "const": "sent"
+          }
+        }
+      },
+      "then": {
+        "required": ["wa_id"],
+        "properties": {
+          "error": false
+        }
+      },
+      "else": {
+        "required": ["error"],
+        "properties": {
+          "wa_id": false
+        }
+      }
     }
   }
 }
