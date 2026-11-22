@@ -266,6 +266,11 @@ BEGIN
     RETURN keep;
   END IF;
 
+  PERFORM 1 FROM contacts WHERE id = keep AND (lid <> p_lid OR bot <> p_bot);
+  IF FOUND THEN
+    RAISE EXCEPTION 'contact % already has a different LID or bot than the ones given', keep
+      USING ERRCODE = 'unique_violation';
+  END IF;
   UPDATE contacts SET
     lid = COALESCE(lid, p_lid),
     pn = COALESCE(p_pn, pn),

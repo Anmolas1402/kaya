@@ -101,6 +101,9 @@ BEGIN
   ASSERT FOUND, 'the account has its current number';
 
   PERFORM pg_temp.expect_error(format('SELECT merge_contacts(%s, %s)', old_owner, new_owner), '23505');
+  PERFORM contact_id_for('100000000000010@lid', NULL, '13135550009@bot');
+  PERFORM pg_temp.expect_error(
+    $q$SELECT contact_id_for('100000000000011@lid', NULL, '13135550009@bot')$q$, '23505');
   PERFORM pg_temp.expect_error($q$SELECT contact_id_for(NULL, NULL)$q$, '22023');
 END
 $$;
