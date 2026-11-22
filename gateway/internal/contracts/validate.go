@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -34,6 +35,9 @@ func (e *ValidationError) Error() string {
 func (e *ValidationError) Unwrap() error { return ErrInvalid }
 
 const maxProblems = 10
+
+// MaxSendTTL is the longest a send request may wait between created_at and expires_at.
+const MaxSendTTL = 24 * time.Hour
 
 func problems(err error) []string {
 	var ve *jsonschema.ValidationError
@@ -150,6 +154,9 @@ func (v *Validator) DecodeSendRequest(raw []byte) (SendRequest, error) {
 	var r SendRequest
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return SendRequest{}, &ValidationError{Problems: []string{"/ does not fit the Go types"}}
+	}
+	if ttl := r.ExpiresAt.Sub(r.CreatedAt.Time); ttl < time.Millisecond || ttl > MaxSendTTL {
+		return SendRequest{}, &ValidationError{Problems: []string{"/expires_at must be after created_at and at most 24 h later"}}
 	}
 	return r, nil
 }
