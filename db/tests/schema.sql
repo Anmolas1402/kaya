@@ -124,18 +124,29 @@ BEGIN
     (lid_chat, 'TESTEDIT', by_lid, false, now(), 'text', 'first', 'live'),
     (pn_chat, 'TESTBOTH', by_pn, false, now(), 'text', 'same', 'history'),
     (lid_chat, 'TESTBOTH', by_pn, false, now(), 'text', 'same', 'live'),
-    (lid_chat, 'TESTBOTH', by_lid, false, now(), 'text', 'same', 'live');
+    (lid_chat, 'TESTBOTH', by_lid, false, now(), 'text', 'same', 'live'),
+    (pn_chat, 'TESTREVOKEKEPT', by_pn, false, now(), 'text', 'secret', 'history'),
+    (lid_chat, 'TESTREVOKEKEPT', by_lid, false, now(), 'text', 'secret', 'live'),
+    (pn_chat, 'TESTEDITKEPT', by_pn, false, now(), 'text', 'first', 'history'),
+    (lid_chat, 'TESTEDITKEPT', by_lid, false, now(), 'text', 'first', 'live');
   UPDATE messages SET body = NULL, deleted_at = now() WHERE wa_id = 'TESTREVOKE' AND sender_id = by_lid;
   UPDATE messages SET body = 'second', edited_at = now() WHERE wa_id = 'TESTEDIT' AND sender_id = by_lid;
+  UPDATE messages SET body = NULL, deleted_at = now() WHERE wa_id = 'TESTREVOKEKEPT' AND sender_id = by_pn;
+  UPDATE messages SET body = 'second', edited_at = now() WHERE wa_id = 'TESTEDITKEPT' AND sender_id = by_pn;
 
   merged := contact_id_for('100000000000007@lid', '917777777777@s.whatsapp.net');
 
-  SELECT count(*) INTO n FROM messages WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH');
-  ASSERT n = 3, 'every spelling of a message becomes one row, even when one chat held several';
+  SELECT count(*) INTO n FROM messages
+  WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH', 'TESTREVOKEKEPT', 'TESTEDITKEPT');
+  ASSERT n = 5, 'every spelling of a message becomes one row, even when one chat held several';
   PERFORM 1 FROM messages WHERE wa_id = 'TESTREVOKE' AND deleted_at IS NOT NULL AND body IS NULL;
   ASSERT FOUND, 'a revoke on either copy survives the merge';
   PERFORM 1 FROM messages WHERE wa_id = 'TESTEDIT' AND edited_at IS NOT NULL AND body = 'second';
   ASSERT FOUND, 'the latest edit on either copy survives the merge';
+  PERFORM 1 FROM messages WHERE wa_id = 'TESTREVOKEKEPT' AND deleted_at IS NOT NULL AND body IS NULL;
+  ASSERT FOUND, 'a revoke on the copy that is kept survives the merge';
+  PERFORM 1 FROM messages WHERE wa_id = 'TESTEDITKEPT' AND edited_at IS NOT NULL AND body = 'second';
+  ASSERT FOUND, 'an edit on the copy that is kept survives the merge';
   SELECT count(*) INTO n FROM messages
   WHERE wa_id IN ('TESTREVOKE', 'TESTEDIT', 'TESTBOTH') AND (sender_id <> merged OR chat_id NOT IN (pn_chat, lid_chat));
   ASSERT n = 0, 'survivors point at the merged contact';

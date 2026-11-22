@@ -148,6 +148,7 @@ BEGIN
       wa_id,
       CASE WHEN sender_id = gone THEN keep ELSE sender_id END
     ORDER BY (sender_id <> gone AND chat_id IS DISTINCT FROM gone_chat) DESC, id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
   );
   UPDATE messages m SET
     deleted_at = f.deleted_at,
