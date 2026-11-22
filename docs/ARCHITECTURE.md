@@ -77,10 +77,18 @@ Folders appear when a phase needs them; empty placeholders are not committed.
   adding a file, an enum value and a case; TypeScript fails the build if one is missed. Every kind
   has a `stub` implementation for development and tests. Kinds so far:
   - `llm`: `complete()` with a `routine` or `heavy` tier, returning text, model and token usage
+  - `llm` returns a `finishReason` (`stop`, `length`, `tool_calls`, `content_filter`) with every
+    completion.
   - `channel`: the one conversation between DJ and Kaya (`start`, `stop`, `send`, `onMessage`).
-    Reading the rest of WhatsApp goes through the database, not the channel.
+    Reading the rest of WhatsApp goes through the database, not the channel. `start()` never
+    fails because a dependency is down; it connects in the background, and the channel is a
+    `/health` check like the db. Every handler sees every message; failures are collected and
+    reported together.
   - `telephony`: `placeCall()` to an E.164 number with a brief, and `getCall()` for status and
     transcript
+  - Every outward action (`send`, `placeCall`) takes a required `idempotencyKey`. A repeated key
+    returns the first result and never acts twice. Stubs never report that an outward action
+    happened.
 - **Logging:** structured JSON to stdout, one logger per service (pino in core, `log/slog` in Go).
   Every line has `time`, `level`, `msg`, `service` and `version`. A request id travels in the
   `X-Request-Id` header and appears on every log line for that request. Errors are logged with an
