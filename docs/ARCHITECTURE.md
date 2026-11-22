@@ -47,28 +47,61 @@ Folders appear when a phase needs them; empty placeholders are not committed.
 
 - **gateway → core:** events (`contracts/schemas/v1/event.schema.json`):
   - `connection.state`: connecting, pairing, connected, disconnected, logged out
-  - `message.stored`: a message row was written (new, edited or deleted). The event points at the
-    row; the body stays in the database.
+  - `message.stored`: a message row was inserted or changed (new, edited or deleted). It carries
+    row ids (`message_id`, `chat_id`, `sender_id`), never the body. The gateway emits it only when
+    the upsert actually inserted or changed the row, so a redelivered or overlapping copy of a
+    message emits nothing. Core keys command handling on `(message_id, change)`, never on the
+    event id.
   - `history.synced`: one history-sync batch was stored
   - `send.result`: what happened to a send request
-- **core → gateway:** send requests (`send-request.schema.json`): text to a JID, optionally quoting a
-  message. Media comes later as a new content type.
+- **core → gateway:** send requests (`send-request.schema.json`): text to a person or a group
+  (never Status, broadcast lists, channels or bots), optionally quoting a message. Each carries an
+  `authorization` and an `expires_at`. The gateway enforces both before sending:
+  - `self_chat` may only go to DJ's own JID.
+  - `confirmed` needs a pending action (4.6) that exists, is confirmed and targets the same chat.
+  - Nothing goes out after `expires_at`; the gateway reports `send.result` failed with `expired`.
+
+  Media comes later as a new content type.
 - **core → docs / voice:** HTTP requests.
-- **Transport: Postgres.** Each direction is a table in the shared database used as a durable
-  queue (an outbox). The writer inserts the payload as `jsonb`, in the same transaction as the
-  data it describes, and sends `NOTIFY` as a wake-up. The reader `LISTEN`s, claims rows with
-  `FOR UPDATE SKIP LOCKED`, marks them handled, and on start (or a missed notify) drains whatever
-  is pending. Nothing is lost when either side is down, and no extra service is needed. Payloads
-  carry a UUID `id`, so handling is idempotent. The tables arrive with the first phase that writes
-  to them (1.2 for events, 1.6 for send requests).
+- **Transport: Postgres.** Each direction is an outbox table in the shared database, used as a
+  durable queue. The tables arrive with the first phase that writes to them: 1.2 for events, 1.6
+  for send requests.
+  - **Writing.** The writer inserts the validated payload as `jsonb` in the same transaction as
+    the data it describes, then sends `NOTIFY` as a wake-up. Rows have a `bigint` identity `seq`
+    and a `state`.
+  - **Reading.** Each table has exactly one consumer: core for events, the gateway for send
+    requests. It `LISTEN`s, and on start (or a missed notify) drains pending rows in `seq` order.
+    With one ordered consumer, `connection.state` changes apply in the order they happened.
+  - **At-least-once, made safe.** Delivery is at least once, so every effect must be idempotent.
+    The reader records the event id as handled in the same transaction as the handler's database
+    writes; a crash before that commit replays the event, a crash after it doesn't.
+  - **Sends can't be made idempotent that way,** because the WhatsApp send happens outside the
+    database. Send requests go `pending → sending → sent | failed`. The gateway generates the
+    WhatsApp message id first (`GenerateMessageID`, passed as `SendRequestExtra.ID`) and commits it
+    with `sending` before the network call. On restart it never resends a row left in `sending`;
+    it reports `send.result` failed with `outcome_unknown` and lets DJ decide. A message is never
+    sent twice and never silently lost.
+  - **Poison rows.** A row that fails the reader's validation, or whose handler fails for a
+    non-transient reason, moves to `dead` with an error code and is skipped, so draining never
+    loops on it. Transient failures retry with backoff, without reordering later rows.
+  - **Retention.** Handled rows are deleted after 7 days; `dead` rows stay until someone looks at
+    them.
+  - **Roles.** When the tables land, each service gets its own Postgres role. The gateway can only
+    insert into the events table and update the send-requests table; core the reverse. Neither can
+    write the other's queue.
 - **Contracts:** every payload has a JSON Schema (draft 2020-12) in `contracts/schemas/v1/` and
   carries `"version": 1`. Both sides validate at the boundary: the writer before inserting, the
   reader before handling.
-  - Go: hand-written types in `gateway/internal/contracts`.
+  - Formats are pinned with patterns, so ajv and the Go validator agree: lowercase UUIDs, and
+    timestamps in UTC with an uppercase `T` and `Z`.
+  - Go: hand-written types in `gateway/internal/contracts`. Every time field uses
+    `contracts.Time`, which always encodes as UTC. Validation errors name the field and the rule,
+    never the value, so they are safe to log.
   - TypeScript: types generated into `core/src/contracts/types.gen.ts` (`make contracts`).
   - Shared samples in `contracts/samples/v1/<schema>/{valid,invalid}/` are checked by both test
     suites. Every valid sample must also round-trip through the Go types unchanged, and core's
-    tests fail if the generated types are out of date.
+    tests fail if the generated types are out of date. The samples are a separate Go package that
+    only tests import, so they never ship in the gateway binary.
   - A contract change is its own PR and updates the schema, the samples and both sides. A
     breaking change gets a new version folder.
 
