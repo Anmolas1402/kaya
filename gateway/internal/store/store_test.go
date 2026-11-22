@@ -16,6 +16,31 @@ func testURL(t *testing.T) string {
 	return url
 }
 
+func TestOpenKeepsSettingsFromTheURL(t *testing.T) {
+	db, err := Open("postgres://127.0.0.1:1/kaya?pool_max_conns=3&connect_timeout=2&application_name=probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := db.pool.Config()
+	if cfg.MaxConns != 3 || cfg.ConnConfig.ConnectTimeout != 2*time.Second ||
+		cfg.ConnConfig.RuntimeParams["application_name"] != "probe" {
+		t.Fatalf("URL settings were overridden: max=%d timeout=%s app=%q",
+			cfg.MaxConns, cfg.ConnConfig.ConnectTimeout, cfg.ConnConfig.RuntimeParams["application_name"])
+	}
+
+	defaults, err := Open("postgres://127.0.0.1:1/kaya")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer defaults.Close()
+	cfg = defaults.pool.Config()
+	if cfg.MaxConns != 10 || cfg.ConnConfig.ConnectTimeout != 5*time.Second ||
+		cfg.ConnConfig.RuntimeParams["application_name"] != "kaya-gateway" {
+		t.Fatalf("defaults not applied: max=%d timeout=%s", cfg.MaxConns, cfg.ConnConfig.ConnectTimeout)
+	}
+}
+
 func TestOpenRejectsBadURL(t *testing.T) {
 	if _, err := Open("postgres://%zz"); err == nil {
 		t.Fatal("expected an error for a malformed URL")
@@ -37,7 +62,7 @@ func TestCheckAgainstRealPostgres(t *testing.T) {
 }
 
 func TestCheckFailsWhenUnreachable(t *testing.T) {
-	db, err := Open("postgres://127.0.0.1:1/kaya?connect_timeout=1")
+	db, err := Open("postgres://127.0.0.1:1/kaya")
 	if err != nil {
 		t.Fatal(err)
 	}
