@@ -1,4 +1,8 @@
-export type CallRequest = Readonly<{ to: string; brief: string }>;
+export type CallRequest = Readonly<{
+  idempotencyKey: string;
+  to: string;
+  brief: string;
+}>;
 
 export type CallStatus =
   | "queued"
